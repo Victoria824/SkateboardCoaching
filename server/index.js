@@ -61,11 +61,18 @@ app.use(express.static('uploads'));
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = 'uploads';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      // Use /tmp directory for Vercel compatibility
+      const uploadDir = '/tmp/uploads';
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+        console.log('Created upload directory:', uploadDir);
+      }
+      cb(null, uploadDir);
+    } catch (error) {
+      console.error('Error creating upload directory:', error);
+      cb(error, null);
     }
-    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     const uniqueName = `${uuidv4()}-${file.originalname}`;
@@ -79,16 +86,10 @@ const upload = multer({
     fileSize: 8 * 1024 * 1024 // 8MB limit for Vercel serverless functions
   },
   fileFilter: (req, file, cb) => {
-    console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname);
-    // More permissive file filter - accept any file that looks like a video
-    if (file.mimetype && file.mimetype.startsWith('video/')) {
-      cb(null, true);
-    } else if (file.originalname && /\.(mp4|mov|avi|webm|mkv|flv|wmv|m4v)$/i.test(file.originalname)) {
-      cb(null, true);
-    } else {
-      console.log('Rejected file:', file);
-      cb(new Error('Only video files are allowed!'), false);
-    }
+    console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname, 'size:', file.size);
+    // Temporarily accept all files to debug the upload issue
+    console.log('Accepting file for debugging:', file.originalname);
+    cb(null, true);
   }
 });
 
@@ -132,7 +133,7 @@ app.post('/api/upload', upload.single('video'), async (req, res) => {
     }
 
     const videoPath = req.file.path;
-    const frameDir = path.join('uploads', 'frames', req.file.filename);
+    const frameDir = path.join('/tmp/uploads', 'frames', req.file.filename);
     
     // Extract frames from video
     await extractFrames(videoPath, frameDir);
@@ -424,7 +425,7 @@ app.post('/api/analyze-pose', upload.single('video'), async (req, res) => {
     }
 
     const videoPath = req.file.path;
-    const frameDir = path.join('uploads', 'frames', req.file.filename);
+    const frameDir = path.join('/tmp/uploads', 'frames', req.file.filename);
 
     // Extract frames from video
     await extractFrames(videoPath, frameDir);
