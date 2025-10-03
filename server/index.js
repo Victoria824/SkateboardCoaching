@@ -11,7 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 // Set FFmpeg path
 ffmpeg.setFfmpegPath(ffmpegPath);
 const { analyzeSnowboardingVideoAdvanced } = require('./replicate-models');
-const { analyzeSnowboardingVideoPoseBased } = require('../pose-pipeline-models');
+const { analyzeSnowboardingVideoPoseBased } = require('./pose-pipeline-models');
 require('dotenv').config();
 
 const app = express();
