@@ -48,9 +48,9 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing, u
       return;
     }
 
-    // Validate file size (50MB limit)
-    if (file.size > 50 * 1024 * 1024) {
-      setError('File size must be less than 50MB');
+    // Validate file size (8MB limit for Vercel compatibility)
+    if (file.size > 8 * 1024 * 1024) {
+      setError('File size must be less than 8MB');
       return;
     }
 
@@ -107,7 +107,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing, u
         </Typography>
         
         <Typography variant="body2" color="text.secondary">
-          Maximum file size: 50MB
+          Maximum file size: 8MB
         </Typography>
       </Box>
 

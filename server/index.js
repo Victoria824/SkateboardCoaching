@@ -26,15 +26,30 @@ const replicate = new Replicate({
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
 console.log('Server starting...');
 
-// Middleware - Simplified CORS for Vercel
+// Middleware - Enhanced CORS for Vercel
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  
+  // Allow specific origins
+  const allowedOrigins = [
+    'https://skateboard-coaching.vercel.app',
+    'https://skateboardcoaching-frontend.vercel.app',
+    'http://localhost:3000'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400'); // 24 hours
   
   if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
+    res.status(200).end();
   } else {
     next();
   }
@@ -61,7 +76,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
+    fileSize: 8 * 1024 * 1024 // 8MB limit for Vercel serverless functions
   },
   fileFilter: (req, file, cb) => {
     console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname);
