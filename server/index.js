@@ -24,7 +24,8 @@ const replicate = new Replicate({
 
 // Test Replicate connection
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
-console.log('Server starting...');
+console.log('Server starting with latest fixes...');
+console.log('Backend deployment trigger - commit updated');
 
 // Middleware - Enhanced CORS for Vercel
 app.use((req, res, next) => {
