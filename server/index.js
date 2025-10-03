@@ -365,10 +365,24 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Test endpoint for analyze-pose
+app.get('/api/analyze-pose', (req, res) => {
+  res.json({
+    message: 'This endpoint requires POST with video file',
+    method: 'POST',
+    contentType: 'multipart/form-data'
+  });
+});
+
 // Pose analysis endpoint (forces pose-based pipeline)
 app.post('/api/analyze-pose', upload.single('video'), async (req, res) => {
+  console.log('🎯 POST /api/analyze-pose called');
+  console.log('🔍 Request file:', req.file ? 'Present' : 'Missing');
+  console.log('🔍 Request headers:', req.headers);
+  
   try {
     if (!req.file) {
+      console.log('❌ No video file uploaded');
       return res.status(400).json({ error: 'No video file uploaded' });
     }
 
