@@ -80,9 +80,13 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname);
-    if (file.mimetype.startsWith('video/') || file.originalname.match(/\.(mp4|mov|avi|webm)$/i)) {
+    // More permissive file filter - accept any file that looks like a video
+    if (file.mimetype && file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else if (file.originalname && /\.(mp4|mov|avi|webm|mkv|flv|wmv|m4v)$/i.test(file.originalname)) {
       cb(null, true);
     } else {
+      console.log('Rejected file:', file);
       cb(new Error('Only video files are allowed!'), false);
     }
   }
