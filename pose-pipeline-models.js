@@ -63,6 +63,8 @@ const estimatePoses = async (videoPath, framePaths) => {
         const imageData = imageToBase64(framePath);
         const imageDataUrl = `data:image/png;base64,${imageData}`;
         
+        console.log('🔍 Debug - Calling ControlNet with imageDataUrl length:', imageDataUrl.length);
+        
         const poseEstimation = await replicate.run(
           POSE_PIPELINE_MODELS.POSE_ESTIMATION,
           {
@@ -74,6 +76,8 @@ const estimatePoses = async (videoPath, framePaths) => {
             }
           }
         );
+        
+        console.log('🔍 Debug - ControlNet call completed successfully');
         
         // ControlNet returns pose data - extract the image URL
         let poseImageUrl = null;
@@ -112,6 +116,7 @@ const estimatePoses = async (videoPath, framePaths) => {
         
       } catch (frameError) {
         console.error(`❌ Frame ${i + 1} pose estimation failed:`, frameError.message);
+        console.error(`❌ Frame ${i + 1} error details:`, frameError);
         // Continue with other frames
       }
     }
