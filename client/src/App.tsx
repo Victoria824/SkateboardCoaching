@@ -73,6 +73,9 @@ function App() {
         console.log('🔍 Debug - Analysis result:', result);
         console.log('🔍 Debug - Has detailedPrompts:', !!result.detailedPrompts);
         console.log('🔍 Debug - detailedPrompts keys:', result.detailedPrompts ? Object.keys(result.detailedPrompts) : 'none');
+        console.log('🔍 Debug - Has poseImages:', !!result.poseImages);
+        console.log('🔍 Debug - poseImages length:', result.poseImages ? result.poseImages.length : 'none');
+        console.log('🔍 Debug - poseImages content:', result.poseImages);
       
       if (result.success) {
         setAnalysisResult(result);
@@ -469,6 +472,14 @@ function App() {
         </Box>
 
         {/* AI Pose Analysis Section - Positioned below both upload and chat */}
+        {(() => {
+          console.log('🔍 Debug - Rendering pose section check:');
+          console.log('🔍 Debug - analysisResult:', !!analysisResult);
+          console.log('🔍 Debug - analysisResult.poseImages:', analysisResult?.poseImages);
+          console.log('🔍 Debug - poseImages length:', analysisResult?.poseImages?.length);
+          console.log('🔍 Debug - Should show pose section:', analysisResult && analysisResult.poseImages && analysisResult.poseImages.length > 0);
+          return null;
+        })()}
         {analysisResult && analysisResult.poseImages && analysisResult.poseImages.length > 0 && (
           <Box sx={{ mt: 4, mb: 4 }}>
             <Card sx={{ 
