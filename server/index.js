@@ -383,6 +383,30 @@ app.get('/api/analyze-pose', (req, res) => {
   });
 });
 
+// Debug endpoint for testing upload
+app.post('/api/debug-upload', upload.single('video'), async (req, res) => {
+  console.log('🔍 DEBUG UPLOAD - File info:');
+  console.log('req.file:', req.file);
+  console.log('req.body:', req.body);
+  console.log('req.headers:', req.headers);
+  
+  if (!req.file) {
+    return res.status(400).json({ 
+      error: 'No file uploaded',
+      file: req.file,
+      body: req.body,
+      headers: req.headers
+    });
+  }
+  
+  res.json({
+    success: true,
+    filename: req.file.filename,
+    mimetype: req.file.mimetype,
+    size: req.file.size
+  });
+});
+
 // Pose analysis endpoint (forces pose-based pipeline)
 app.post('/api/analyze-pose', upload.single('video'), async (req, res) => {
   console.log('🎯 POST /api/analyze-pose called');
