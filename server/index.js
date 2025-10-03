@@ -24,6 +24,7 @@ const replicate = new Replicate({
 
 // Test Replicate connection
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
+console.log('Server starting...');
 
 // Middleware
 app.use(cors());
