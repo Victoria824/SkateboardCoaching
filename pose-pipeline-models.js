@@ -471,6 +471,10 @@ const analyzeSnowboardingVideoPoseBased = async (videoPath, framePaths) => {
       analysis: coachingReport.briefAssessment,
       poseVideoUrl: null,
       poseAnalyses: poseResult.poseAnalyses,
+      poseImages: poseResult.poseAnalyses.map(pose => ({
+        frame: pose.frame,
+        imageUrl: pose.poseImageUrl
+      })),
       technicalAnalysis: technicalAnalysis,
       sceneDescription: sceneDescription,
       detailedPrompts: coachingReport.detailedPrompts,
@@ -511,6 +515,7 @@ I can provide more detailed information about your Key Strengths, Main Areas for
       success: true,
       analysis: briefAssessment,
       poseVideoUrl: null,
+      poseImages: [], // No pose images for fallback
       technicalAnalysis: fallbackAnalysis,
       sceneDescription: 'Snowboarding technique analysis',
       detailedPrompts: detailedPrompts,
