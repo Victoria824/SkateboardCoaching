@@ -26,6 +26,7 @@ const replicate = new Replicate({
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
 console.log('Server starting with latest fixes...');
 console.log('Backend deployment trigger - commit updated');
+console.log('Force deployment - timestamp:', new Date().toISOString());
 
 // Middleware - Enhanced CORS for Vercel
 app.use((req, res, next) => {
