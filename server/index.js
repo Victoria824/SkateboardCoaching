@@ -67,7 +67,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50000000 // 50MB default
+    fileSize: 20 * 1024 * 1024 // 20MB limit for Vercel compatibility
   },
   fileFilter: (req, file, cb) => {
     console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname);
