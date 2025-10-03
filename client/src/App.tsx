@@ -15,6 +15,7 @@ import {
 import { CloudUpload, Sports, Psychology } from '@mui/icons-material';
 import VideoUpload from './components/VideoUpload';
 import ChatInterface from './components/ChatInterface';
+import API_BASE_URL from './config';
 import './App.css';
 
 interface AnalysisResult {
@@ -62,7 +63,7 @@ function App() {
       const formData = new FormData();
       formData.append('video', file);
 
-      const response = await fetch('/api/analyze-pose', {
+      const response = await fetch(`${API_BASE_URL}/api/analyze-pose`, {
         method: 'POST',
         body: formData,
       });
@@ -120,7 +121,7 @@ function App() {
     
     if (currentAnalysisResult && currentAnalysisResult.detailedPrompts && Object.keys(currentAnalysisResult.detailedPrompts).length > 0) {
       try {
-        const response = await fetch('/api/chat', {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
