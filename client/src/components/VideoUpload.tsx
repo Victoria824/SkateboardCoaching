@@ -11,9 +11,11 @@ import { CloudUpload, Videocam } from '@mui/icons-material';
 interface VideoUploadProps {
   onVideoSelect: (file: File) => void;
   isAnalyzing: boolean;
+  uploadedVideo?: File | null;
+  analysisComplete?: boolean;
 }
 
-const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing }) => {
+const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing, uploadedVideo, analysisComplete }) => {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,6 +123,39 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing })
             Analyzing your snowboarding video...
           </Typography>
           <LinearProgress />
+        </Box>
+      )}
+
+      {uploadedVideo && analysisComplete && (
+        <Box mt={3}>
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Videocam color="primary" />
+            Your Uploaded Video
+          </Typography>
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'grey.300',
+              borderRadius: 2,
+              overflow: 'hidden',
+              backgroundColor: 'background.paper'
+            }}
+          >
+            <video
+              controls
+              style={{
+                width: '100%',
+                maxHeight: '300px',
+                display: 'block'
+              }}
+              src={URL.createObjectURL(uploadedVideo)}
+            >
+              Your browser does not support the video tag.
+            </video>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            File: {uploadedVideo.name} ({(uploadedVideo.size / (1024 * 1024)).toFixed(1)} MB)
+          </Typography>
         </Box>
       )}
     </Box>

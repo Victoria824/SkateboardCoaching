@@ -19,23 +19,26 @@ interface ChatInterfaceProps {
   chatHistory: ChatMessage[];
   onSendMessage: (message: string) => void;
   isAnalyzing: boolean;
+  hasAnalysis?: boolean;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   chatHistory, 
   onSendMessage, 
-  isAnalyzing 
+  isAnalyzing,
+  hasAnalysis = false
 }) => {
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // Removed automatic scrolling to prevent page from jumping to bottom
+  // const scrollToBottom = () => {
+  //   messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [chatHistory]);
+  // useEffect(() => {
+  //   scrollToBottom();
+  // }, [chatHistory]);
 
   const handleSendMessage = () => {
     if (inputMessage.trim() && !isAnalyzing) {
@@ -51,12 +54,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const getQuickQuestions = () => [
-    "How can I improve my balance?",
-    "What about my edge control?",
-    "Any tips for better posture?",
-    "How's my arm positioning?"
-  ];
+  const getQuickQuestions = () => {
+    if (hasAnalysis) {
+      return [
+        "What are my key strengths?",
+        "What areas need improvement?",
+        "What drills should I practice?",
+        "How can I improve my technique?"
+      ];
+    } else {
+      return [
+        "How can I improve my balance?",
+        "What about my edge control?",
+        "Any tips for better posture?",
+        "How's my arm positioning?"
+      ];
+    }
+  };
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
