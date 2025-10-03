@@ -26,28 +26,22 @@ const replicate = new Replicate({
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
 console.log('Server starting...');
 
-// Middleware
-app.use(cors({
-  origin: [
-    'https://skateboard-coaching.vercel.app',
-    'https://skateboardcoaching-frontend.vercel.app',
-    'http://localhost:3000'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json());
-app.use(express.static('uploads'));
-
-// Handle preflight OPTIONS requests
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+// Middleware - Simplified CORS for Vercel
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
 });
+
+app.use(express.json());
+app.use(express.static('uploads'));
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -67,7 +61,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 20 * 1024 * 1024 // 20MB limit for Vercel compatibility
+    fileSize: 50 * 1024 * 1024 // 50MB limit
   },
   fileFilter: (req, file, cb) => {
     console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname);
