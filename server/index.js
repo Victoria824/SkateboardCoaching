@@ -27,9 +27,27 @@ console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'N
 console.log('Server starting...');
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://skateboard-coaching.vercel.app',
+    'https://skateboardcoaching-frontend.vercel.app',
+    'http://localhost:3000'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 app.use(express.static('uploads'));
+
+// Handle preflight OPTIONS requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
