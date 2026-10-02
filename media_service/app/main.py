@@ -1,19 +1,30 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import create_schema, get_session
-from .models import Frame, ProcessingJob, Video
-from .schemas import FrameResponse, JobResponse, UploadResponse, VideoResponse
+from .models import Annotation, AnnotationActivity, AnnotationTask, Frame, ProcessingJob, Video
+from .schemas import (
+    AnnotationResponse,
+    AnnotationSaveRequest,
+    AnnotationSaveResponse,
+    AnnotationTaskDetail,
+    AnnotationTaskResponse,
+    FrameResponse,
+    JobResponse,
+    UploadResponse,
+    VideoResponse,
+)
 from .storage import LocalStorage, UploadTooLarge, safe_filename
 
 
@@ -171,3 +182,105 @@ def list_frames(video_id: str, session: Session = Depends(get_session)) -> List[
     ).all()
     return [frame_response(frame) for frame in frames]
 
+
+@app.post("/api/videos/{video_id}/annotation-tasks", response_model=AnnotationTaskResponse, status_code=201)
+def create_annotation_task(video_id: str, session: Session = Depends(get_session)) -> AnnotationTaskResponse:
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if video.status != "READY_FOR_ANNOTATION":
+        raise HTTPException(status_code=409, detail="Video is not ready for annotation")
+    existing = session.scalar(
+        select(AnnotationTask)
+        .where(AnnotationTask.video_id == video_id, AnnotationTask.status != "COMPLETED")
+        .order_by(AnnotationTask.created_at)
+        .limit(1)
+    )
+    if existing:
+        return AnnotationTaskResponse.model_validate(existing)
+    task = AnnotationTask(video=video, status="PENDING")
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+    return AnnotationTaskResponse.model_validate(task)
+
+
+@app.get("/api/annotation-tasks/{task_id}", response_model=AnnotationTaskDetail)
+def get_annotation_task(task_id: str, session: Session = Depends(get_session)) -> AnnotationTaskDetail:
+    task = session.get(AnnotationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Annotation task not found")
+    return AnnotationTaskDetail(
+        **AnnotationTaskResponse.model_validate(task).model_dump(),
+        video=video_response(task.video),
+    )
+
+
+def require_task_frame(session: Session, task_id: str, frame_id: str):
+    task = session.get(AnnotationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Annotation task not found")
+    frame = session.get(Frame, frame_id)
+    if frame is None or frame.video_id != task.video_id:
+        raise HTTPException(status_code=404, detail="Frame does not belong to this task")
+    return task, frame
+
+
+@app.get(
+    "/api/annotation-tasks/{task_id}/frames/{frame_id}/annotations",
+    response_model=List[AnnotationResponse],
+)
+def list_annotations(task_id: str, frame_id: str, session: Session = Depends(get_session)):
+    require_task_frame(session, task_id, frame_id)
+    return session.scalars(
+        select(Annotation)
+        .where(Annotation.task_id == task_id, Annotation.frame_id == frame_id)
+        .order_by(Annotation.created_at)
+    ).all()
+
+
+@app.put(
+    "/api/annotation-tasks/{task_id}/frames/{frame_id}/annotations",
+    response_model=AnnotationSaveResponse,
+)
+def save_annotations(
+    task_id: str,
+    frame_id: str,
+    request: AnnotationSaveRequest,
+    session: Session = Depends(get_session),
+) -> AnnotationSaveResponse:
+    task, _ = require_task_frame(session, task_id, frame_id)
+    session.execute(
+        delete(Annotation).where(Annotation.task_id == task_id, Annotation.frame_id == frame_id)
+    )
+    saved = [
+        Annotation(task_id=task_id, frame_id=frame_id, **item.model_dump())
+        for item in request.annotations
+    ]
+    session.add_all(saved)
+    session.add(
+        AnnotationActivity(
+            task_id=task_id,
+            frame_id=frame_id,
+            action="SAVE",
+            duration_ms=request.duration_ms,
+            annotation_count=len(saved),
+        )
+    )
+    if task.status == "PENDING":
+        task.status = "IN_PROGRESS"
+    session.commit()
+    for annotation in saved:
+        session.refresh(annotation)
+    return AnnotationSaveResponse(annotations=saved, saved_count=len(saved))
+
+
+@app.post("/api/annotation-tasks/{task_id}/complete", response_model=AnnotationTaskResponse)
+def complete_annotation_task(task_id: str, session: Session = Depends(get_session)):
+    task = session.get(AnnotationTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Annotation task not found")
+    task.status = "COMPLETED"
+    task.completed_at = datetime.utcnow()
+    session.commit()
+    return AnnotationTaskResponse.model_validate(task)

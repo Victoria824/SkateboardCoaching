@@ -11,6 +11,7 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
 - `GET /api/videos/{video_id}` and `/frames` expose processed metadata and frame URLs.
 - `Idempotency-Key` prevents a client retry from creating duplicate work.
 - Failed work records a stable error code and can be retried.
+- Annotation-task endpoints persist normalized boxes, keypoints, task state, and time-per-frame activity.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 

@@ -4,6 +4,8 @@ An AI-powered snowboarding coaching platform that analyzes your snowboarding vid
 
 The repository is evolving into a **Snowboard Vision Data Platform**. Milestone 1 adds a FastAPI media service, a separate worker, persistent video/job/frame records, real FFmpeg extraction, and a browser progress view without removing the existing coaching workflow. See [the media service guide](media_service/README.md) and [architecture](docs/media-architecture.md).
 
+Milestone 2 adds persisted annotation tasks and a browser workspace for normalized bounding boxes and pose keypoints. It includes frame navigation, drag/resize editing, keyboard shortcuts, save-before-navigation, and per-frame annotation timing. See [the annotation workflow](docs/annotation-workflow.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

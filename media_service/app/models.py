@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -40,6 +40,9 @@ class Video(Base):
     jobs: Mapped[List["ProcessingJob"]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+    annotation_tasks: Mapped[List["AnnotationTask"]] = relationship(
+        back_populates="video", cascade="all, delete-orphan"
+    )
 
 
 class Frame(Base):
@@ -56,6 +59,9 @@ class Frame(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     video: Mapped[Video] = relationship(back_populates="frames")
+    annotations: Mapped[List["Annotation"]] = relationship(
+        back_populates="frame", cascade="all, delete-orphan"
+    )
 
 
 class ProcessingJob(Base):
@@ -77,3 +83,55 @@ class ProcessingJob(Base):
 
     video: Mapped[Video] = relationship(back_populates="jobs")
 
+
+class AnnotationTask(Base):
+    __tablename__ = "annotation_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    assigned_to: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="PENDING", index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    video: Mapped[Video] = relationship(back_populates="annotation_tasks")
+    annotations: Mapped[List["Annotation"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+    activity_events: Mapped[List["AnnotationActivity"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("annotation_tasks.id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[str] = mapped_column(ForeignKey("frames.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(100))
+    annotation_type: Mapped[str] = mapped_column(String(50))
+    geometry: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(50), default="human")
+    model_prediction_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    task: Mapped[AnnotationTask] = relationship(back_populates="annotations")
+    frame: Mapped[Frame] = relationship(back_populates="annotations")
+
+
+class AnnotationActivity(Base):
+    __tablename__ = "annotation_activity"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("annotation_tasks.id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[str] = mapped_column(ForeignKey("frames.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(50))
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    annotation_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    task: Mapped[AnnotationTask] = relationship(back_populates="activity_events")

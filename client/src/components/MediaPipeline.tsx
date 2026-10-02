@@ -13,6 +13,7 @@ import {
 import { CloudUpload, Dataset, MovieFilter } from '@mui/icons-material';
 
 import {
+  createAnnotationTask,
   getJob,
   getProcessedVideo,
   ingestVideo,
@@ -28,6 +29,7 @@ const MediaPipeline: React.FC = () => {
   const [video, setVideo] = useState<ProcessedVideo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -58,6 +60,7 @@ const MediaPipeline: React.FC = () => {
     setError(null);
     setJob(null);
     setVideo(null);
+    setTaskId(null);
     try {
       const result = await ingestVideo(file);
       setJob(result.job);
@@ -71,6 +74,17 @@ const MediaPipeline: React.FC = () => {
   };
 
   const active = uploading || (job !== null && !TERMINAL_STATES.has(job.state));
+
+  const prepareAnnotationTask = async () => {
+    if (!video) return;
+    setError(null);
+    try {
+      const task = await createAnnotationTask(video.id);
+      setTaskId(task.id);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to create annotation task.');
+    }
+  };
 
   return (
     <Card elevation={8} sx={{ mb: 4, borderRadius: 4, border: '1px solid rgba(0,0,0,.06)' }}>
@@ -119,6 +133,13 @@ const MediaPipeline: React.FC = () => {
             <Alert severity="success" icon={<MovieFilter />}>
               {video.frames.length} real frames are ready for annotation · {video.width}×{video.height} · {video.codec} · {video.duration_ms ? (video.duration_ms / 1000).toFixed(1) : '—'}s
             </Alert>
+            <Box mt={2}>
+              {taskId ? (
+                <Button variant="contained" href={`/annotate/${taskId}`}>Open annotation workspace</Button>
+              ) : (
+                <Button variant="outlined" onClick={prepareAnnotationTask}>Create annotation task</Button>
+              )}
+            </Box>
             <Box mt={2} display="grid" gridTemplateColumns="repeat(auto-fill, minmax(150px, 1fr))" gap={1.5}>
               {video.frames.slice(0, 6).map((frame) => (
                 <Box key={frame.id}>

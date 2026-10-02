@@ -15,6 +15,7 @@ import { CloudUpload, Sports, Psychology } from '@mui/icons-material';
 import VideoUpload from './components/VideoUpload';
 import ChatInterface from './components/ChatInterface';
 import MediaPipeline from './components/MediaPipeline';
+import AnnotationWorkspace from './components/AnnotationWorkspace';
 import API_BASE_URL from './config';
 import './App.css';
 
@@ -167,6 +168,11 @@ function App() {
       }, 0);
     }
   };
+
+  const annotationRoute = window.location.pathname.match(/^\/annotate\/([^/]+)\/?$/);
+  if (annotationRoute) {
+    return <AnnotationWorkspace taskId={annotationRoute[1]} />;
+  }
 
   return (
     <div className="App" style={{
