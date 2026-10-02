@@ -1,12 +1,11 @@
 import React, { useCallback, useState } from 'react';
 import {
   Box,
-  Button,
   Typography,
   Alert,
   LinearProgress
 } from '@mui/material';
-import { CloudUpload, Videocam } from '@mui/icons-material';
+import { Videocam } from '@mui/icons-material';
 
 interface VideoUploadProps {
   onVideoSelect: (file: File) => void;
@@ -29,19 +28,9 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing, u
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
-    }
-  }, []);
-
-  const handleFile = (file: File) => {
+  const handleFile = useCallback((file: File) => {
     setError(null);
-    
+
     // Validate file type
     if (!file.type.startsWith('video/')) {
       setError('Please select a video file');
@@ -55,7 +44,17 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onVideoSelect, isAnalyzing, u
     }
 
     onVideoSelect(file);
-  };
+  }, [onVideoSelect]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  }, [handleFile]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {

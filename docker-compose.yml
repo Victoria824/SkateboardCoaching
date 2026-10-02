@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: snowboard
+      POSTGRES_USER: snowboard
+      POSTGRES_PASSWORD: snowboard
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snowboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  media-api:
+    build: ./media_service
+    environment: &media-environment
+      MEDIA_DATABASE_URL: postgresql+psycopg://snowboard:snowboard@postgres:5432/snowboard
+      MEDIA_STORAGE_ROOT: /data/media
+      MEDIA_CORS_ORIGINS: http://localhost:3000
+      MEDIA_FRAME_SAMPLE_FPS: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - media-data:/data/media
+
+  media-worker:
+    build: ./media_service
+    command: ["python", "-m", "app.worker"]
+    environment: *media-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - media-data:/data/media
+
+volumes:
+  postgres-data:
+  media-data:
+

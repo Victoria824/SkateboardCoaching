@@ -24,9 +24,6 @@ const replicate = new Replicate({
 
 // Test Replicate connection
 console.log('Replicate API Token:', process.env.REPLICATE_API_TOKEN ? 'Set' : 'Not set');
-console.log('Server starting with latest fixes...');
-console.log('Backend deployment trigger - commit updated');
-console.log('Force deployment - timestamp:', new Date().toISOString());
 
 // Middleware - Enhanced CORS for Vercel
 app.use((req, res, next) => {
@@ -88,9 +85,18 @@ const upload = multer({
     fileSize: 8 * 1024 * 1024 // 8MB limit for Vercel serverless functions
   },
   fileFilter: (req, file, cb) => {
-    console.log('File filter - mimetype:', file.mimetype, 'originalname:', file.originalname, 'size:', file.size);
-    // Temporarily accept all files to debug the upload issue
-    console.log('Accepting file for debugging:', file.originalname);
+    const allowedMimeTypes = new Set([
+      'video/mp4',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/webm',
+      'video/x-matroska'
+    ]);
+    const allowedExtensions = new Set(['.mp4', '.mov', '.avi', '.webm', '.mkv']);
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (!allowedMimeTypes.has(file.mimetype) || !allowedExtensions.has(extension)) {
+      return cb(new Error('Unsupported video format'));
+    }
     cb(null, true);
   }
 });
@@ -402,35 +408,9 @@ app.get('/api/analyze-pose', (req, res) => {
   });
 });
 
-// Debug endpoint for testing upload
-app.post('/api/debug-upload', upload.single('video'), async (req, res) => {
-  console.log('🔍 DEBUG UPLOAD - File info:');
-  console.log('req.file:', req.file);
-  console.log('req.body:', req.body);
-  console.log('req.headers:', req.headers);
-  
-  if (!req.file) {
-    return res.status(400).json({ 
-      error: 'No file uploaded',
-      file: req.file,
-      body: req.body,
-      headers: req.headers
-    });
-  }
-  
-  res.json({
-    success: true,
-    filename: req.file.filename,
-    mimetype: req.file.mimetype,
-    size: req.file.size
-  });
-});
-
 // Pose analysis endpoint (forces pose-based pipeline)
 app.post('/api/analyze-pose', upload.single('video'), async (req, res) => {
   console.log('🎯 POST /api/analyze-pose called');
-  console.log('🔍 Request file:', req.file ? 'Present' : 'Missing');
-  console.log('🔍 Request headers:', req.headers);
   
   try {
     if (!req.file) {
@@ -454,14 +434,7 @@ app.post('/api/analyze-pose', upload.single('video'), async (req, res) => {
     console.log('Frame files:', frameFiles.length);
 
   // Use pose-based analysis (ControlNet pose detection)
-  console.log('🔍 Debug - Calling analyzeSnowboardingVideoPoseBased...');
   const analysis = await analyzeSnowboardingVideoPoseBased(videoPath, frameFiles);
-  console.log('🔍 Debug - Analysis result:', !!analysis);
-  console.log('🔍 Debug - Analysis has detailedPrompts:', !!analysis.detailedPrompts);
-  console.log('🔍 Debug - Analysis pipeline:', analysis.pipeline);
-  console.log('🔍 Debug - Analysis keys:', Object.keys(analysis));
-  console.log('🔍 Debug - detailedPrompts type:', typeof analysis.detailedPrompts);
-  console.log('🔍 Debug - detailedPrompts keys:', analysis.detailedPrompts ? Object.keys(analysis.detailedPrompts) : 'none');
 
     // Clean up temporary files
     fs.unlinkSync(videoPath);

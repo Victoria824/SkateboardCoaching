@@ -2,6 +2,8 @@
 
 An AI-powered snowboarding coaching platform that analyzes your snowboarding videos and provides personalized coaching advice using Replicate's advanced AI models.
 
+The repository is evolving into a **Snowboard Vision Data Platform**. Milestone 1 adds a FastAPI media service, a separate worker, persistent video/job/frame records, real FFmpeg extraction, and a browser progress view without removing the existing coaching workflow. See [the media service guide](media_service/README.md) and [architecture](docs/media-architecture.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos
@@ -62,7 +64,27 @@ An AI-powered snowboarding coaching platform that analyzes your snowboarding vid
    npm run dev
    ```
 
-   This will start both the backend server (port 5000) and React frontend (port 3000).
+   This will start both the backend server (port 5001) and React frontend (port 3000).
+
+### Run the asynchronous media pipeline
+
+The media pipeline can run with local SQLite storage:
+
+```bash
+cd media_service
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Start the worker in a second terminal:
+
+```bash
+cd media_service
+.venv/bin/python -m app.worker
+```
+
+Alternatively, `docker compose up --build` starts the API, worker, and PostgreSQL together.
 
 ## 🛠️ Technology Stack
 

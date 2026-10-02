@@ -134,6 +134,16 @@ Thumbs.db
 uploads/
 !uploads/.gitkeep
 
+# Python media service
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+media_service/data/
+media_service/*.db
+
 # Build outputs
 build/
 dist/

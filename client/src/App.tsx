@@ -4,7 +4,6 @@ import {
   Paper,
   Typography,
   Box,
-  Button,
   LinearProgress,
   Alert,
   Card,
@@ -15,6 +14,7 @@ import {
 import { CloudUpload, Sports, Psychology } from '@mui/icons-material';
 import VideoUpload from './components/VideoUpload';
 import ChatInterface from './components/ChatInterface';
+import MediaPipeline from './components/MediaPipeline';
 import API_BASE_URL from './config';
 import './App.css';
 
@@ -43,10 +43,7 @@ function App() {
   const [uploadedVideo, setUploadedVideo] = useState<File | null>(null);
   const analysisResultRef = useRef<AnalysisResult | null>(null);
 
-  // Debug: Monitor analysisResult state changes
   useEffect(() => {
-    console.log('🔍 Debug - analysisResult state changed:', analysisResult);
-    console.log('🔍 Debug - has detailedPrompts in state:', !!analysisResult?.detailedPrompts);
     analysisResultRef.current = analysisResult;
   }, [analysisResult]);
 
@@ -69,13 +66,6 @@ function App() {
       });
 
       const result = await response.json();
-      
-        console.log('🔍 Debug - Analysis result:', result);
-        console.log('🔍 Debug - Has detailedPrompts:', !!result.detailedPrompts);
-        console.log('🔍 Debug - detailedPrompts keys:', result.detailedPrompts ? Object.keys(result.detailedPrompts) : 'none');
-        console.log('🔍 Debug - Has poseImages:', !!result.poseImages);
-        console.log('🔍 Debug - poseImages length:', result.poseImages ? result.poseImages.length : 'none');
-        console.log('🔍 Debug - poseImages content:', result.poseImages);
       
       if (result.success) {
         setAnalysisResult(result);
@@ -116,11 +106,6 @@ function App() {
 
     // If we have analysis data, send follow-up question to backend
     const currentAnalysisResult = analysisResult || analysisResultRef.current;
-    console.log('🔍 Debug - analysisResult:', analysisResult);
-    console.log('🔍 Debug - analysisResultRef:', analysisResultRef.current);
-    console.log('🔍 Debug - currentAnalysisResult:', currentAnalysisResult);
-    console.log('🔍 Debug - has detailedPrompts:', !!currentAnalysisResult?.detailedPrompts);
-    console.log('🔍 Debug - detailedPrompts object:', currentAnalysisResult?.detailedPrompts);
     
     if (currentAnalysisResult && currentAnalysisResult.detailedPrompts && Object.keys(currentAnalysisResult.detailedPrompts).length > 0) {
       try {
@@ -171,7 +156,6 @@ function App() {
       }
     } else {
       // No analysis data available, provide general response
-      console.log('🔍 Debug - No analysis data available, providing general response');
       setChatHistory(prev => [
         ...prev,
         { role: 'assistant', content: 'Please upload a video first to get personalized coaching advice!' }
@@ -294,6 +278,8 @@ function App() {
             Upload your snowboarding video and get personalized coaching advice powered by AI
           </Typography>
         </Paper>
+
+        <MediaPipeline />
 
         {/* Main Content */}
         <Box display="flex" gap={3} flexDirection={{ xs: 'column', lg: 'row' }}>
@@ -472,14 +458,6 @@ function App() {
         </Box>
 
         {/* AI Pose Analysis Section - Positioned below both upload and chat */}
-        {(() => {
-          console.log('🔍 Debug - Rendering pose section check:');
-          console.log('🔍 Debug - analysisResult:', !!analysisResult);
-          console.log('🔍 Debug - analysisResult.poseImages:', analysisResult?.poseImages);
-          console.log('🔍 Debug - poseImages length:', analysisResult?.poseImages?.length);
-          console.log('🔍 Debug - Should show pose section:', analysisResult && analysisResult.poseImages && analysisResult.poseImages.length > 0);
-          return null;
-        })()}
         {analysisResult && analysisResult.poseImages && analysisResult.poseImages.length > 0 && (
           <Box sx={{ mt: 4, mb: 4 }}>
             <Card sx={{ 
