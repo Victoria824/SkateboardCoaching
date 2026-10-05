@@ -13,8 +13,9 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  media-api:
+  media-migrate:
     build: ./media_service
+    command: ["alembic", "upgrade", "head"]
     environment: &media-environment
       MEDIA_DATABASE_URL: postgresql+psycopg://snowboard:snowboard@postgres:5432/snowboard
       MEDIA_STORAGE_ROOT: /data/media
@@ -23,6 +24,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - media-data:/data/media
+
+  media-api:
+    build: ./media_service
+    environment: *media-environment
+    depends_on:
+      media-migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     volumes:
@@ -33,12 +43,11 @@ services:
     command: ["python", "-m", "app.worker"]
     environment: *media-environment
     depends_on:
-      postgres:
-        condition: service_healthy
+      media-migrate:
+        condition: service_completed_successfully
     volumes:
       - media-data:/data/media
 
 volumes:
   postgres-data:
   media-data:
-

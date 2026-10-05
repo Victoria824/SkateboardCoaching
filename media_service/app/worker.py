@@ -4,7 +4,7 @@ import time
 
 from .config import settings
 from .database import SessionLocal, create_schema
-from .service import claim_next_job, process_job
+from .service import claim_next_job, process_inference_job, process_job
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -26,7 +26,13 @@ def run() -> None:
         with SessionLocal() as session:
             job_id = claim_next_job(session)
             if job_id:
-                process_job(session, job_id)
+                from .models import ProcessingJob
+
+                job = session.get(ProcessingJob, job_id)
+                if job and job.job_type == "MODEL_INFERENCE":
+                    process_inference_job(session, job_id)
+                else:
+                    process_job(session, job_id)
             else:
                 time.sleep(settings.worker_poll_seconds)
     logger.info("Media worker stopped")
@@ -34,4 +40,3 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
-

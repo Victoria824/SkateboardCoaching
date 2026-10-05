@@ -143,6 +143,8 @@ __pycache__/
 htmlcov/
 media_service/data/
 media_service/*.db
+media_service/*.pt
+media_service/runs/
 
 # Build outputs
 build/

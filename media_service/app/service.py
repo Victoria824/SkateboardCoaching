@@ -6,8 +6,9 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
+from .inference import InferenceError, PredictionProvider, UltralyticsProvider
 from .media import FFmpegProcessor, MediaProcessingError
-from .models import Frame, ProcessingJob, Video
+from .models import Frame, ModelPrediction, ModelRun, ProcessingJob, Video
 from .storage import LocalStorage
 
 
@@ -38,6 +39,7 @@ def claim_next_job(session: Session) -> Optional[str]:
     if candidate is None:
         return None
 
+    claimed_state = "RUNNING_INFERENCE" if candidate.job_type == "MODEL_INFERENCE" else "PROCESSING_VIDEO"
     result = session.execute(
         update(ProcessingJob)
         .where(
@@ -45,7 +47,7 @@ def claim_next_job(session: Session) -> Optional[str]:
             ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")),
         )
         .values(
-            state="PROCESSING_VIDEO",
+            state=claimed_state,
             progress=5,
             attempts=ProcessingJob.attempts + 1,
             started_at=datetime.utcnow(),
@@ -118,3 +120,90 @@ def process_job(
     except Exception as error:
         record_failure(session, job_id, "UNEXPECTED_PROCESSING_ERROR", str(error))
         logger.exception("Unexpected media processing failure", extra={"job_id": job_id})
+
+
+def record_inference_failure(session: Session, job_id: str, code: str, message: str) -> None:
+    session.rollback()
+    job = session.get(ProcessingJob, job_id)
+    model_run = session.get(ModelRun, job.model_run_id) if job and job.model_run_id else None
+    if job:
+        job.error_code = code
+        job.error_message = message[-2000:]
+        job.state = "RETRY_PENDING" if job.attempts < job.max_attempts else "FAILED"
+        job.progress = 0
+    if model_run:
+        model_run.status = "RETRY_PENDING" if job and job.state == "RETRY_PENDING" else "FAILED"
+        model_run.error_code = code
+        model_run.error_message = message[-2000:]
+    session.commit()
+
+
+def process_inference_job(
+    session: Session,
+    job_id: str,
+    provider: Optional[PredictionProvider] = None,
+    storage: Optional[LocalStorage] = None,
+) -> None:
+    storage = storage or LocalStorage()
+    job = session.get(ProcessingJob, job_id)
+    if job is None or job.model_run_id is None:
+        raise ValueError("Inference job is missing its model run")
+    model_run = session.get(ModelRun, job.model_run_id)
+    if model_run is None:
+        raise ValueError("Unknown model run {}".format(job.model_run_id))
+
+    try:
+        provider = provider or UltralyticsProvider(model_run.model_name)
+        model_run.status = "RUNNING"
+        model_run.started_at = datetime.utcnow()
+        model_run.total_frames = len(model_run.video.frames)
+        model_run.processed_frames = 0
+        model_run.error_code = None
+        model_run.error_message = None
+        job.state = "RUNNING_INFERENCE"
+        job.progress = 5
+        session.execute(delete(ModelPrediction).where(ModelPrediction.model_run_id == model_run.id))
+        session.commit()
+
+        started_at = datetime.utcnow()
+        threshold = float(model_run.parameters.get("confidence_threshold", 0.25))
+        frames = list(model_run.video.frames)
+        for index, frame in enumerate(frames, start=1):
+            outputs = provider.infer_frame(
+                storage.absolute_path(frame.storage_path),
+                model_run.model_kind,
+                threshold,
+                model_run.device,
+            )
+            for output in outputs:
+                session.add(
+                    ModelPrediction(
+                        model_run_id=model_run.id,
+                        frame_id=frame.id,
+                        label=output.label,
+                        confidence=output.confidence,
+                        annotation_type=output.annotation_type,
+                        geometry=output.geometry,
+                    )
+                )
+            model_run.processed_frames = index
+            job.progress = 5 + round((index / max(1, len(frames))) * 90)
+            session.commit()
+
+        completed_at = datetime.utcnow()
+        model_run.model_version = "{}+ultralytics-{}".format(
+            model_run.model_version, provider.runtime_version
+        )
+        model_run.latency_ms = round((completed_at - started_at).total_seconds() * 1000)
+        model_run.status = "COMPLETED"
+        model_run.completed_at = completed_at
+        job.state = "COMPLETED"
+        job.progress = 100
+        job.completed_at = completed_at
+        session.commit()
+    except InferenceError as error:
+        record_inference_failure(session, job_id, error.code, str(error))
+        logger.exception("Model inference failed", extra={"job_id": job_id})
+    except Exception as error:
+        record_inference_failure(session, job_id, "UNEXPECTED_INFERENCE_ERROR", str(error))
+        logger.exception("Unexpected inference failure", extra={"job_id": job_id})

@@ -6,6 +6,7 @@ import {
   Chip,
   CircularProgress,
   FormControl,
+  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -15,8 +16,12 @@ import {
 import {
   ArrowBack,
   ArrowForward,
+  AutoAwesome,
+  Check,
+  Close,
   CropFree,
   Delete,
+  Edit,
   Save,
   ScatterPlot,
 } from '@mui/icons-material';
@@ -25,10 +30,18 @@ import {
   AnnotationDraft,
   AnnotationRecord,
   AnnotationTask,
+  ModelMetrics,
+  ModelPrediction,
+  ModelRun,
   completeAnnotationTask,
+  createModelRun,
   getAnnotationTask,
   getFrameAnnotations,
+  getFramePredictions,
+  getModelMetrics,
+  getModelRun,
   mediaUrl,
+  rejectModelPrediction,
   saveFrameAnnotations,
 } from '../mediaApi';
 
@@ -55,7 +68,12 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [task, setTask] = useState<AnnotationTask | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [annotations, setAnnotations] = useState<LocalAnnotation[]>([]);
+  const [predictions, setPredictions] = useState<ModelPrediction[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedPredictionId, setSelectedPredictionId] = useState<string | null>(null);
+  const [modelRun, setModelRun] = useState<ModelRun | null>(null);
+  const [modelJobProgress, setModelJobProgress] = useState(0);
+  const [metrics, setMetrics] = useState<ModelMetrics | null>(null);
   const [tool, setTool] = useState<Tool>('bbox');
   const [label, setLabel] = useState('rider');
   const [keypointName, setKeypointName] = useState(KEYPOINTS[0]);
@@ -70,6 +88,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
 
   const frames = task?.video?.frames || [];
   const frame = frames[frameIndex];
+  const selectedPrediction = predictions.find((item) => item.id === selectedPredictionId) || null;
 
   useEffect(() => {
     getAnnotationTask(taskId)
@@ -83,8 +102,8 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setMessage(null);
     setSelectedId(null);
     frameStartedAt.current = Date.now();
-    getFrameAnnotations(taskId, frame.id)
-      .then((records) => {
+    Promise.all([getFrameAnnotations(taskId, frame.id), getFramePredictions(frame.id)])
+      .then(([records, predictionRecords]) => {
         setAnnotations(records.map((record: AnnotationRecord) => ({
           id: record.id,
           label: record.label,
@@ -93,10 +112,35 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
           source: record.source,
           model_prediction_id: record.model_prediction_id,
         })));
+        setPredictions(predictionRecords);
         setDirty(false);
       })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load annotations.'));
   }, [frame, taskId]);
+
+  useEffect(() => {
+    if (!modelRun || !['QUEUED', 'RUNNING', 'RETRY_PENDING'].includes(modelRun.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const nextRun = await getModelRun(modelRun.id);
+        setModelRun(nextRun);
+        setModelJobProgress(nextRun.total_frames
+          ? Math.round((nextRun.processed_frames / nextRun.total_frames) * 100)
+          : 0);
+        if (nextRun.status === 'COMPLETED' && frame) {
+          setPredictions(await getFramePredictions(frame.id));
+          setMetrics(await getModelMetrics(nextRun.id));
+          setMessage(`${nextRun.model_kind} predictions are ready`);
+        }
+        if (nextRun.status === 'FAILED') {
+          setError(nextRun.error_message || 'Model inference failed.');
+        }
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to read inference status.');
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [frame, modelRun]);
 
   const normalizedPoint = (event: ReactPointerEvent<SVGSVGElement | SVGElement>) => {
     const bounds = svgRef.current?.getBoundingClientRect();
@@ -130,6 +174,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       setOperation({ kind: 'draw', startX: point.x, startY: point.y });
       setDraftBox({ x: point.x, y: point.y, width: 0, height: 0 });
       setSelectedId(null);
+      setSelectedPredictionId(null);
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
@@ -141,6 +186,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         ? { ...item, geometry: { points: [...existing, { name: keypointName, ...point, visible: true }] } }
         : item));
       setSelectedId(pose.id);
+      setSelectedPredictionId(null);
     } else {
       const id = localId();
       setAnnotations((items) => [...items, {
@@ -151,6 +197,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         source: 'human',
       }]);
       setSelectedId(id);
+      setSelectedPredictionId(null);
     }
     setDirty(true);
   };
@@ -218,6 +265,10 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       })));
       setDirty(false);
       setMessage(`Saved ${saved.length} annotations`);
+      const predictionRecords = await getFramePredictions(frame.id);
+      setPredictions(predictionRecords);
+      const runId = predictionRecords[0]?.model_run_id || modelRun?.id;
+      if (runId) setMetrics(await getModelMetrics(runId));
       return true;
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Save failed.');
@@ -225,7 +276,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     } finally {
       setSaving(false);
     }
-  }, [annotations, frame, saving, taskId]);
+  }, [annotations, frame, modelRun?.id, saving, taskId]);
 
   const navigate = useCallback(async (offset: number) => {
     if (dirty && !await save()) return;
@@ -238,6 +289,100 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setSelectedId(null);
     setDirty(true);
   }, [selectedId]);
+
+  const runInference = async (modelKind: 'detection' | 'pose') => {
+    if (!task?.video) return;
+    setError(null);
+    setMessage(null);
+    try {
+      const created = await createModelRun(task.video.id, modelKind);
+      setModelRun(created.model_run);
+      setModelJobProgress(0);
+      setMessage(`${modelKind} inference queued`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to start inference.');
+    }
+  };
+
+  const acceptPrediction = useCallback(async () => {
+    if (!selectedPrediction || !frame || saving) return;
+    setSaving(true);
+    setError(null);
+    const next = [...annotations, {
+      id: localId(),
+      label: selectedPrediction.label,
+      annotation_type: selectedPrediction.annotation_type,
+      geometry: selectedPrediction.geometry,
+      source: 'model' as const,
+      model_prediction_id: selectedPrediction.id,
+    }];
+    try {
+      const saved = await saveFrameAnnotations(
+        taskId,
+        frame.id,
+        next.map(({ id, ...item }) => item),
+        Date.now() - frameStartedAt.current
+      );
+      setAnnotations(saved.map((record) => ({
+        id: record.id,
+        label: record.label,
+        annotation_type: record.annotation_type,
+        geometry: record.geometry,
+        source: record.source,
+        model_prediction_id: record.model_prediction_id,
+      })));
+      setPredictions(await getFramePredictions(frame.id));
+      setSelectedPredictionId(null);
+      setDirty(false);
+      setMessage('Prediction accepted');
+      if (selectedPrediction.model_run_id) {
+        setMetrics(await getModelMetrics(selectedPrediction.model_run_id));
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to accept prediction.');
+    } finally {
+      setSaving(false);
+    }
+  }, [annotations, frame, saving, selectedPrediction, taskId]);
+
+  const correctPrediction = useCallback(() => {
+    if (!selectedPrediction) return;
+    const id = localId();
+    setAnnotations((items) => [...items, {
+      id,
+      label: selectedPrediction.label,
+      annotation_type: selectedPrediction.annotation_type,
+      geometry: selectedPrediction.geometry,
+      source: 'model_corrected',
+      model_prediction_id: selectedPrediction.id,
+    }]);
+    setPredictions((items) => items.map((item) => item.id === selectedPrediction.id
+      ? { ...item, status: 'CORRECTED' }
+      : item));
+    setSelectedId(id);
+    setSelectedPredictionId(null);
+    setDirty(true);
+    setMessage('Prediction copied for correction; edit it and save the frame');
+  }, [selectedPrediction]);
+
+  const rejectPrediction = useCallback(async () => {
+    if (!selectedPrediction) return;
+    try {
+      await rejectModelPrediction(
+        selectedPrediction.id,
+        taskId,
+        Date.now() - frameStartedAt.current
+      );
+      setPredictions((items) => items.map((item) => item.id === selectedPrediction.id
+        ? { ...item, status: 'REJECTED' }
+        : item));
+      setSelectedPredictionId(null);
+      setMessage('Prediction rejected');
+      setMetrics(await getModelMetrics(selectedPrediction.model_run_id));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to reject prediction.');
+    }
+  }, [selectedPrediction, taskId]);
 
   const completeTask = async () => {
     if (dirty && !await save()) return;
@@ -263,13 +408,19 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         setTool('bbox');
       } else if (event.key.toLowerCase() === 'k') {
         setTool('keypoints');
+      } else if (event.key.toLowerCase() === 'a' && selectedPrediction) {
+        acceptPrediction();
+      } else if (event.key.toLowerCase() === 'r' && selectedPrediction) {
+        rejectPrediction();
+      } else if (event.key.toLowerCase() === 'c' && selectedPrediction) {
+        correctPrediction();
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         deleteSelected();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [deleteSelected, navigate, save]);
+  }, [acceptPrediction, correctPrediction, deleteSelected, navigate, rejectPrediction, save, selectedPrediction]);
 
   if (error && !task) return <Alert severity="error">{error}</Alert>;
   if (!task || !frame) return <Box p={8} textAlign="center"><CircularProgress /></Box>;
@@ -303,18 +454,52 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
               onPointerCancel={handlePointerUp}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: tool === 'bbox' ? 'crosshair' : 'copy', touchAction: 'none' }}
             >
+              {predictions.filter((prediction) => prediction.status === 'PENDING').map((prediction) =>
+                prediction.annotation_type === 'bbox' ? (() => {
+                  const box = prediction.geometry as BBox;
+                  const selected = selectedPredictionId === prediction.id;
+                  return <g key={prediction.id}>
+                    <rect
+                      x={box.x * 1000} y={box.y * 1000} width={box.width * 1000} height={box.height * 1000}
+                      fill="rgba(245,158,11,.08)" stroke={selected ? '#facc15' : '#f59e0b'}
+                      strokeWidth={selected ? 6 : 4} strokeDasharray="12 8" vectorEffect="non-scaling-stroke"
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        setSelectedPredictionId(prediction.id);
+                        setSelectedId(null);
+                      }}
+                    />
+                    <text x={box.x * 1000 + 8} y={box.y * 1000 + 28} fill="#fbbf24" fontSize="24">
+                      {prediction.label} {(prediction.confidence * 100).toFixed(0)}%
+                    </text>
+                  </g>;
+                })() : (prediction.geometry.points as Point[]).map((point) => (
+                  <g key={`${prediction.id}-${point.name}`} onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedPredictionId(prediction.id);
+                    setSelectedId(null);
+                  }}>
+                    <circle cx={point.x * 1000} cy={point.y * 1000} r="10" fill="#f59e0b" stroke="#fef3c7" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+                    <text x={point.x * 1000 + 14} y={point.y * 1000 - 12} fill="#fbbf24" fontSize="20">{point.name}</text>
+                  </g>
+                ))
+              )}
               {annotations.map((annotation) => annotation.annotation_type === 'bbox' ? (() => {
                 const box = annotation.geometry as BBox;
                 const selected = selectedId === annotation.id;
+                const annotationColor = annotation.source === 'model'
+                  ? '#22c55e'
+                  : annotation.source === 'model_corrected' ? '#a855f7' : '#0ea5e9';
                 return <g key={annotation.id}>
                   <rect
                     x={box.x * 1000} y={box.y * 1000} width={box.width * 1000} height={box.height * 1000}
-                    fill="rgba(14,165,233,.12)" stroke={selected ? '#facc15' : '#0ea5e9'} strokeWidth={selected ? 6 : 4}
+                    fill="rgba(14,165,233,.12)" stroke={selected ? '#facc15' : annotationColor} strokeWidth={selected ? 6 : 4}
                     vectorEffect="non-scaling-stroke"
                     onPointerDown={(event) => {
                       event.stopPropagation();
                       const point = normalizedPoint(event);
                       setSelectedId(annotation.id);
+                      setSelectedPredictionId(null);
                       setOperation({ kind: 'move', id: annotation.id, startX: point.x, startY: point.y, original: box });
                     }}
                   />
@@ -329,7 +514,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                   <circle
                     cx={point.x * 1000} cy={point.y * 1000} r="10" fill="#f43f5e" stroke="white" strokeWidth="3"
                     vectorEffect="non-scaling-stroke"
-                    onPointerDown={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setOperation({ kind: 'point', id: annotation.id, name: point.name }); }}
+                    onPointerDown={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setSelectedPredictionId(null); setOperation({ kind: 'point', id: annotation.id, name: point.name }); }}
                   />
                   <text x={point.x * 1000 + 14} y={point.y * 1000 - 12} fill="white" fontSize="20">{point.name}</text>
                 </g>
@@ -344,6 +529,40 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         </Box>
 
         <Paper sx={{ width: { lg: 300 }, p: 2, alignSelf: 'flex-start' }}>
+          <Typography variant="h6" gutterBottom><AutoAwesome sx={{ verticalAlign: 'middle', mr: 1 }} />Model assist</Typography>
+          <Stack direction="row" spacing={1} mb={1}>
+            <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('detection')}>Detect</Button>
+            <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('pose')}>Pose</Button>
+          </Stack>
+          {modelRun && (
+            <Box mb={2}>
+              <Typography variant="caption" color="text.secondary">{modelRun.model_name} · {modelRun.status}</Typography>
+              {['QUEUED', 'RUNNING', 'RETRY_PENDING'].includes(modelRun.status) && <LinearProgress variant="determinate" value={modelJobProgress} sx={{ mt: 0.5 }} />}
+            </Box>
+          )}
+          <Stack direction="row" spacing={1} flexWrap="wrap" mb={2}>
+            <Chip size="small" label={`${predictions.filter((item) => item.status === 'PENDING').length} pending`} sx={{ bgcolor: '#fef3c7' }} />
+            <Chip size="small" label="Model" sx={{ color: '#15803d' }} />
+            <Chip size="small" label="Corrected" sx={{ color: '#9333ea' }} />
+          </Stack>
+          {selectedPrediction && (
+            <Box sx={{ p: 1.5, mb: 2, bgcolor: '#fff7ed', borderRadius: 1 }}>
+              <Typography fontWeight={700}>{selectedPrediction.label} · {(selectedPrediction.confidence * 100).toFixed(1)}%</Typography>
+              <Typography variant="caption" color="text.secondary">{selectedPrediction.model_name} · {selectedPrediction.model_version}</Typography>
+              <Stack direction="row" spacing={0.5} mt={1}>
+                <Button size="small" color="success" startIcon={<Check />} onClick={acceptPrediction}>Accept</Button>
+                <Button size="small" startIcon={<Edit />} onClick={correctPrediction}>Correct</Button>
+                <Button size="small" color="error" startIcon={<Close />} onClick={rejectPrediction}>Reject</Button>
+              </Stack>
+            </Box>
+          )}
+          {metrics && (
+            <Box sx={{ p: 1.5, mb: 2, bgcolor: '#f8fafc', borderRadius: 1 }}>
+              <Typography variant="subtitle2">Run metrics</Typography>
+              <Typography variant="body2">Accepted {(metrics.acceptance_rate * 100).toFixed(0)}% · Corrected {(metrics.correction_rate * 100).toFixed(0)}% · Rejected {(metrics.rejection_rate * 100).toFixed(0)}%</Typography>
+              <Typography variant="caption" color="text.secondary">{metrics.pending} pending · {metrics.average_decision_time_ms ? `${Math.round(metrics.average_decision_time_ms)}ms avg decision` : 'No timing yet'}</Typography>
+            </Box>
+          )}
           <Typography variant="h6" gutterBottom>Tools</Typography>
           <Stack direction="row" spacing={1} mb={2}>
             <Button fullWidth variant={tool === 'bbox' ? 'contained' : 'outlined'} startIcon={<CropFree />} onClick={() => setTool('bbox')}>Box</Button>
@@ -370,7 +589,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Button variant="outlined" color="success" disabled={task.status === 'COMPLETED'} onClick={completeTask}>Complete task</Button>
           </Stack>
           <Typography variant="body2" color="text.secondary" mt={2}>
-            B/K tools · ←/→ frames · Shift+←/→ jump 10 · Delete removes · Ctrl/Cmd+S saves
+            A accept · C correct · R reject · B/K tools · ←/→ frames · Shift+←/→ jump 10 · Delete removes · Ctrl/Cmd+S saves
           </Typography>
           <Typography variant="body2" mt={2}>{annotations.length} annotations {dirty && '· unsaved'}</Typography>
           {message && <Alert severity="success" sx={{ mt: 2 }}>{message}</Alert>}

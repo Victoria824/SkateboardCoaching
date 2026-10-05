@@ -43,6 +43,9 @@ class Video(Base):
     annotation_tasks: Mapped[List["AnnotationTask"]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+    model_runs: Mapped[List["ModelRun"]] = relationship(
+        back_populates="video", cascade="all, delete-orphan"
+    )
 
 
 class Frame(Base):
@@ -62,6 +65,9 @@ class Frame(Base):
     annotations: Mapped[List["Annotation"]] = relationship(
         back_populates="frame", cascade="all, delete-orphan"
     )
+    model_predictions: Mapped[List["ModelPrediction"]] = relationship(
+        back_populates="frame", cascade="all, delete-orphan"
+    )
 
 
 class ProcessingJob(Base):
@@ -69,6 +75,10 @@ class ProcessingJob(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     video_id: Mapped[str] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    job_type: Mapped[str] = mapped_column(String(50), default="VIDEO_INGESTION", index=True)
+    model_run_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     state: Mapped[str] = mapped_column(String(50), default="QUEUED", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
@@ -82,6 +92,7 @@ class ProcessingJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     video: Mapped[Video] = relationship(back_populates="jobs")
+    model_run: Mapped[Optional["ModelRun"]] = relationship(back_populates="job")
 
 
 class AnnotationTask(Base):
@@ -115,7 +126,9 @@ class Annotation(Base):
     annotation_type: Mapped[str] = mapped_column(String(50))
     geometry: Mapped[Dict[str, Any]] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(50), default="human")
-    model_prediction_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    model_prediction_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("model_predictions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -135,3 +148,72 @@ class AnnotationActivity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     task: Mapped[AnnotationTask] = relationship(back_populates="activity_events")
+
+
+class ModelRun(Base):
+    __tablename__ = "model_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    model_kind: Mapped[str] = mapped_column(String(50), index=True)
+    provider: Mapped[str] = mapped_column(String(100))
+    model_name: Mapped[str] = mapped_column(String(255))
+    model_version: Mapped[str] = mapped_column(String(100))
+    device: Mapped[str] = mapped_column(String(50), default="cpu")
+    parameters: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="QUEUED", index=True)
+    total_frames: Mapped[int] = mapped_column(Integer, default=0)
+    processed_frames: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    video: Mapped[Video] = relationship(back_populates="model_runs")
+    job: Mapped[Optional[ProcessingJob]] = relationship(back_populates="model_run", uselist=False)
+    predictions: Mapped[List["ModelPrediction"]] = relationship(
+        back_populates="model_run", cascade="all, delete-orphan"
+    )
+
+
+class ModelPrediction(Base):
+    __tablename__ = "model_predictions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    model_run_id: Mapped[str] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[str] = mapped_column(ForeignKey("frames.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(100), index=True)
+    confidence: Mapped[float] = mapped_column(Float)
+    annotation_type: Mapped[str] = mapped_column(String(50))
+    geometry: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(50), default="PENDING", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    model_run: Mapped[ModelRun] = relationship(back_populates="predictions")
+    frame: Mapped[Frame] = relationship(back_populates="model_predictions")
+    decisions: Mapped[List["PredictionDecision"]] = relationship(
+        back_populates="prediction", cascade="all, delete-orphan"
+    )
+
+
+class PredictionDecision(Base):
+    __tablename__ = "prediction_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    prediction_id: Mapped[str] = mapped_column(
+        ForeignKey("model_predictions.id", ondelete="CASCADE"), index=True
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_tasks.id", ondelete="CASCADE"), index=True
+    )
+    annotation_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("annotations.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(50), index=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    prediction: Mapped[ModelPrediction] = relationship(back_populates="decisions")

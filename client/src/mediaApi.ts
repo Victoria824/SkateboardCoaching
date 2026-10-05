@@ -65,6 +65,50 @@ export interface AnnotationDraft {
   model_prediction_id?: string | null;
 }
 
+export interface ModelRun {
+  id: string;
+  video_id: string;
+  model_kind: 'detection' | 'pose';
+  provider: string;
+  model_name: string;
+  model_version: string;
+  device: string;
+  parameters: Record<string, unknown>;
+  status: string;
+  total_frames: number;
+  processed_frames: number;
+  latency_ms?: number | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface ModelPrediction {
+  id: string;
+  model_run_id: string;
+  frame_id: string;
+  label: string;
+  confidence: number;
+  annotation_type: 'bbox' | 'keypoints';
+  geometry: Record<string, any>;
+  status: 'PENDING' | 'ACCEPTED' | 'CORRECTED' | 'REJECTED';
+  model_name: string;
+  model_version: string;
+}
+
+export interface ModelMetrics {
+  model_run_id: string;
+  total_predictions: number;
+  pending: number;
+  accepted: number;
+  corrected: number;
+  rejected: number;
+  acceptance_rate: number;
+  correction_rate: number;
+  rejection_rate: number;
+  average_decision_time_ms?: number | null;
+  by_label: Record<string, Record<string, number>>;
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -135,6 +179,51 @@ export async function saveFrameAnnotations(
 export async function completeAnnotationTask(taskId: string): Promise<AnnotationTask> {
   return parseResponse<AnnotationTask>(
     await fetch(`${MEDIA_API_BASE_URL}/api/annotation-tasks/${taskId}/complete`, { method: 'POST' })
+  );
+}
+
+export async function createModelRun(
+  videoId: string,
+  modelKind: 'detection' | 'pose'
+): Promise<{ model_run: ModelRun; job: ProcessingJob }> {
+  return parseResponse<{ model_run: ModelRun; job: ProcessingJob }>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/model-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_kind: modelKind, confidence_threshold: 0.25 }),
+    })
+  );
+}
+
+export async function getModelRun(modelRunId: string): Promise<ModelRun> {
+  return parseResponse<ModelRun>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/model-runs/${modelRunId}`)
+  );
+}
+
+export async function getFramePredictions(frameId: string): Promise<ModelPrediction[]> {
+  return parseResponse<ModelPrediction[]>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/frames/${frameId}/predictions`)
+  );
+}
+
+export async function rejectModelPrediction(
+  predictionId: string,
+  taskId: string,
+  durationMs: number
+): Promise<void> {
+  await parseResponse(
+    await fetch(`${MEDIA_API_BASE_URL}/api/predictions/${predictionId}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, duration_ms: durationMs }),
+    })
+  );
+}
+
+export async function getModelMetrics(modelRunId: string): Promise<ModelMetrics> {
+  return parseResponse<ModelMetrics>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/model-runs/${modelRunId}/metrics`)
   );
 }
 

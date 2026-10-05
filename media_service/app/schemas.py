@@ -122,3 +122,80 @@ class AnnotationTaskDetail(AnnotationTaskResponse):
 class AnnotationSaveResponse(BaseModel):
     annotations: List[AnnotationResponse]
     saved_count: int
+
+
+class ModelRunRequest(BaseModel):
+    model_kind: Literal["detection", "pose"] = "detection"
+    provider: Literal["ultralytics"] = "ultralytics"
+    model_name: Optional[str] = None
+    model_version: str = "pretrained"
+    device: str = "cpu"
+    confidence_threshold: float = Field(default=0.25, ge=0, le=1)
+
+
+class ModelRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    video_id: str
+    model_kind: str
+    provider: str
+    model_name: str
+    model_version: str
+    device: str
+    parameters: Dict[str, Any]
+    status: str
+    total_frames: int
+    processed_frames: int
+    latency_ms: Optional[int]
+    error_code: Optional[str]
+    error_message: Optional[str]
+    created_at: datetime
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+
+
+class ModelRunCreatedResponse(BaseModel):
+    model_run: ModelRunResponse
+    job: JobResponse
+
+
+class ModelPredictionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    model_run_id: str
+    frame_id: str
+    label: str
+    confidence: float
+    annotation_type: str
+    geometry: Dict[str, Any]
+    status: str
+    model_name: str
+    model_version: str
+    created_at: datetime
+    resolved_at: Optional[datetime]
+
+
+class PredictionRejectRequest(BaseModel):
+    task_id: str
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class PredictionDecisionResponse(BaseModel):
+    prediction_id: str
+    status: str
+
+
+class ModelMetricsResponse(BaseModel):
+    model_run_id: str
+    total_predictions: int
+    pending: int
+    accepted: int
+    corrected: int
+    rejected: int
+    acceptance_rate: float
+    correction_rate: float
+    rejection_rate: float
+    average_decision_time_ms: Optional[float]
+    by_label: Dict[str, Dict[str, int]]
