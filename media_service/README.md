@@ -35,6 +35,23 @@ Install the optional real-model runtime before running detection or pose inferen
 .venv/bin/pip install -r requirements-ml.txt
 ```
 
+## Real-video evaluation
+
+Run the production FFmpeg and Ultralytics workers against a licensed local video without touching
+the development database:
+
+```bash
+.venv/bin/python scripts/evaluate_pipeline.py /path/to/video.mp4 \
+  --source-url "https://source.example/video" \
+  --source-creator "Creator name" \
+  --source-license "License or permission evidence" \
+  --output data/evaluation/report.json
+```
+
+The source video, extracted frames, and JSON output belong under the ignored `data/` directory.
+See [the real-video findings](../docs/real-video-evaluation.md) for the recorded methodology and
+results.
+
 Database schema changes are managed by Alembic:
 
 ```bash

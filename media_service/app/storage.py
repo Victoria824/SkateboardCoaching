@@ -15,7 +15,7 @@ def safe_filename(filename: str) -> str:
 
 class LocalStorage:
     def __init__(self, root: Path = settings.media_root):
-        self.root = root
+        self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def video_path(self, video_id: str, filename: str) -> Path:
@@ -55,4 +55,3 @@ class UploadTooLarge(Exception):
     def __init__(self, max_bytes: int):
         self.max_bytes = max_bytes
         super().__init__("Upload exceeds {} bytes".format(max_bytes))
-

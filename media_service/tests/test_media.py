@@ -1,6 +1,7 @@
 import pytest
 
 from app.media import MediaProcessingError, parse_frame_rate, parse_probe_payload
+from app.storage import LocalStorage
 
 
 def test_parse_probe_payload(sample_probe_payload):
@@ -28,3 +29,9 @@ def test_parse_frame_rate_rejects_zero():
 
     assert error.value.code == "INVALID_FRAME_RATE"
 
+
+def test_local_storage_normalizes_root_before_building_relative_paths(tmp_path):
+    storage = LocalStorage(tmp_path / "nested" / ".." / "media")
+    frame = storage.root / "frames" / "frame.jpg"
+
+    assert storage.relative_path(frame) == "frames/frame.jpg"

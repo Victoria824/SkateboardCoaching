@@ -8,6 +8,11 @@ Milestone 2 adds persisted annotation tasks and a browser workspace for normaliz
 
 Milestone 3 adds asynchronous detection and pose runs, immutable versioned predictions, Accept/Correct/Reject decisions, and measured model-assistance metrics. See [the model-assisted labeling workflow](docs/model-assisted-labeling.md).
 
+The real-video benchmark exercises the full FFmpeg and Ultralytics path on licensed YouTube
+snowboarding footage and records temporal and semantic failure modes. See
+[the evaluation report](docs/real-video-evaluation.md) and
+[the Milestone 4 plan](docs/milestone-4-plan.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos
