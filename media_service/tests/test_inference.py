@@ -169,6 +169,7 @@ def test_prediction_accept_correct_reject_and_metrics():
                 },
             )
             metrics = client.get(f"/api/model-runs/{run_id}/metrics")
+            runs = client.get(f"/api/videos/{video_id}/model-runs")
             created_run = client.post(
                 f"/api/videos/{video_id}/model-runs",
                 json={"model_kind": "pose", "confidence_threshold": 0.4},
@@ -186,7 +187,8 @@ def test_prediction_accept_correct_reject_and_metrics():
     assert payload["rejected"] == 1
     assert payload["acceptance_rate"] == 1 / 3
     assert payload["average_decision_time_ms"] == 500
+    assert runs.status_code == 200
+    assert runs.json()[0]["id"] == run_id
     assert created_run.status_code == 202
     assert created_run.json()["model_run"]["model_name"] == "yolo11n-pose.pt"
     assert created_run.json()["job"]["state"] == "QUEUED"
-

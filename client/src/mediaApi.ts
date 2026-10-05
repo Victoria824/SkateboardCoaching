@@ -201,6 +201,12 @@ export async function getModelRun(modelRunId: string): Promise<ModelRun> {
   );
 }
 
+export async function getVideoModelRuns(videoId: string): Promise<ModelRun[]> {
+  return parseResponse<ModelRun[]>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/model-runs`)
+  );
+}
+
 export async function getFramePredictions(frameId: string): Promise<ModelPrediction[]> {
   return parseResponse<ModelPrediction[]>(
     await fetch(`${MEDIA_API_BASE_URL}/api/frames/${frameId}/predictions`)

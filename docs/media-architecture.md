@@ -16,6 +16,7 @@ Python media worker
     |
     +--> ffprobe metadata
     +--> FFmpeg frame extraction
+    +--> versioned detection / pose inference
     +--> timestamped frame records
     |
     v
@@ -51,4 +52,3 @@ Each job records attempts, progress, stable error code, human-readable failure d
 - The worker polls the database. Redis/Celery is intentionally deferred until workload evidence justifies it.
 - Frame timestamps are derived from the configured constant sampling rate. Variable-rate, scene-based, and keyframe sampling will require timestamp extraction from FFmpeg output.
 - Schema creation currently uses SQLAlchemy metadata. Alembic migrations are required before a shared production deployment.
-

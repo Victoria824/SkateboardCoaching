@@ -6,6 +6,8 @@ The repository is evolving into a **Snowboard Vision Data Platform**. Milestone 
 
 Milestone 2 adds persisted annotation tasks and a browser workspace for normalized bounding boxes and pose keypoints. It includes frame navigation, drag/resize editing, keyboard shortcuts, save-before-navigation, and per-frame annotation timing. See [the annotation workflow](docs/annotation-workflow.md).
 
+Milestone 3 adds asynchronous detection and pose runs, immutable versioned predictions, Accept/Correct/Reject decisions, and measured model-assistance metrics. See [the model-assisted labeling workflow](docs/model-assisted-labeling.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

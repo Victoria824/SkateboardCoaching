@@ -82,3 +82,16 @@ def test_upload_rejects_non_video_extension(tmp_path):
 
     assert response.status_code == 415
 
+
+def test_cors_allows_browser_annotation_updates():
+    with TestClient(main.app) as client:
+        response = client.options(
+            "/api/annotation-tasks/task/frames/frame/annotations",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "PUT",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "PUT" in response.headers["access-control-allow-methods"]

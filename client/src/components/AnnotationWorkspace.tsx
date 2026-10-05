@@ -40,10 +40,12 @@ import {
   getFramePredictions,
   getModelMetrics,
   getModelRun,
+  getVideoModelRuns,
   mediaUrl,
   rejectModelPrediction,
   saveFrameAnnotations,
 } from '../mediaApi';
+import { predictionToAnnotation, updatePredictionStatus } from '../annotation/predictionState';
 
 type Tool = 'bbox' | 'keypoints';
 type LocalAnnotation = AnnotationDraft & { id: string };
@@ -85,6 +87,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const frameStartedAt = useRef(Date.now());
+  const decisionStartedAt = useRef(Date.now());
 
   const frames = task?.video?.frames || [];
   const frame = frames[frameIndex];
@@ -92,7 +95,20 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
 
   useEffect(() => {
     getAnnotationTask(taskId)
-      .then(setTask)
+      .then(async (loadedTask) => {
+        setTask(loadedTask);
+        if (loadedTask.video) {
+          const runs = await getVideoModelRuns(loadedTask.video.id);
+          const latestRun = runs[0];
+          if (latestRun) {
+            setModelRun(latestRun);
+            setModelJobProgress(latestRun.total_frames
+              ? Math.round((latestRun.processed_frames / latestRun.total_frames) * 100)
+              : 0);
+            setMetrics(await getModelMetrics(latestRun.id));
+          }
+        }
+      })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load task.'));
   }, [taskId]);
 
@@ -101,9 +117,10 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setError(null);
     setMessage(null);
     setSelectedId(null);
+    setSelectedPredictionId(null);
     frameStartedAt.current = Date.now();
     Promise.all([getFrameAnnotations(taskId, frame.id), getFramePredictions(frame.id)])
-      .then(([records, predictionRecords]) => {
+      .then(async ([records, predictionRecords]) => {
         setAnnotations(records.map((record: AnnotationRecord) => ({
           id: record.id,
           label: record.label,
@@ -113,6 +130,8 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
           model_prediction_id: record.model_prediction_id,
         })));
         setPredictions(predictionRecords);
+        const latestRunId = predictionRecords[predictionRecords.length - 1]?.model_run_id;
+        if (latestRunId) setMetrics(await getModelMetrics(latestRunId));
         setDirty(false);
       })
       .catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load annotations.'));
@@ -149,6 +168,12 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       x: clamp((event.clientX - bounds.left) / bounds.width),
       y: clamp((event.clientY - bounds.top) / bounds.height),
     };
+  };
+
+  const selectPrediction = (predictionId: string) => {
+    decisionStartedAt.current = Date.now();
+    setSelectedPredictionId(predictionId);
+    setSelectedId(null);
   };
 
   const updateBBox = (id: string, geometry: BBox) => {
@@ -310,18 +335,14 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setError(null);
     const next = [...annotations, {
       id: localId(),
-      label: selectedPrediction.label,
-      annotation_type: selectedPrediction.annotation_type,
-      geometry: selectedPrediction.geometry,
-      source: 'model' as const,
-      model_prediction_id: selectedPrediction.id,
+      ...predictionToAnnotation(selectedPrediction, 'model'),
     }];
     try {
       const saved = await saveFrameAnnotations(
         taskId,
         frame.id,
         next.map(({ id, ...item }) => item),
-        Date.now() - frameStartedAt.current
+        Date.now() - decisionStartedAt.current
       );
       setAnnotations(saved.map((record) => ({
         id: record.id,
@@ -350,15 +371,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     const id = localId();
     setAnnotations((items) => [...items, {
       id,
-      label: selectedPrediction.label,
-      annotation_type: selectedPrediction.annotation_type,
-      geometry: selectedPrediction.geometry,
-      source: 'model_corrected',
-      model_prediction_id: selectedPrediction.id,
+      ...predictionToAnnotation(selectedPrediction, 'model_corrected'),
     }]);
-    setPredictions((items) => items.map((item) => item.id === selectedPrediction.id
-      ? { ...item, status: 'CORRECTED' }
-      : item));
+    setPredictions((items) => updatePredictionStatus(items, selectedPrediction.id, 'CORRECTED'));
     setSelectedId(id);
     setSelectedPredictionId(null);
     setDirty(true);
@@ -371,11 +386,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       await rejectModelPrediction(
         selectedPrediction.id,
         taskId,
-        Date.now() - frameStartedAt.current
+        Date.now() - decisionStartedAt.current
       );
-      setPredictions((items) => items.map((item) => item.id === selectedPrediction.id
-        ? { ...item, status: 'REJECTED' }
-        : item));
+      setPredictions((items) => updatePredictionStatus(items, selectedPrediction.id, 'REJECTED'));
       setSelectedPredictionId(null);
       setMessage('Prediction rejected');
       setMetrics(await getModelMetrics(selectedPrediction.model_run_id));
@@ -397,6 +410,12 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         save();
@@ -465,8 +484,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                       strokeWidth={selected ? 6 : 4} strokeDasharray="12 8" vectorEffect="non-scaling-stroke"
                       onPointerDown={(event) => {
                         event.stopPropagation();
-                        setSelectedPredictionId(prediction.id);
-                        setSelectedId(null);
+                        selectPrediction(prediction.id);
                       }}
                     />
                     <text x={box.x * 1000 + 8} y={box.y * 1000 + 28} fill="#fbbf24" fontSize="24">
@@ -476,8 +494,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                 })() : (prediction.geometry.points as Point[]).map((point) => (
                   <g key={`${prediction.id}-${point.name}`} onPointerDown={(event) => {
                     event.stopPropagation();
-                    setSelectedPredictionId(prediction.id);
-                    setSelectedId(null);
+                    selectPrediction(prediction.id);
                   }}>
                     <circle cx={point.x * 1000} cy={point.y * 1000} r="10" fill="#f59e0b" stroke="#fef3c7" strokeWidth="3" vectorEffect="non-scaling-stroke" />
                     <text x={point.x * 1000 + 14} y={point.y * 1000 - 12} fill="#fbbf24" fontSize="20">{point.name}</text>

@@ -29,6 +29,20 @@ python3 -m venv .venv
 .venv/bin/python -m app.worker
 ```
 
+Install the optional real-model runtime before running detection or pose inference:
+
+```bash
+.venv/bin/pip install -r requirements-ml.txt
+```
+
+Database schema changes are managed by Alembic:
+
+```bash
+.venv/bin/alembic upgrade head
+```
+
+Docker Compose runs this migration automatically before starting the API and worker.
+
 Open `http://localhost:8000/docs` to exercise the API.
 
 ```bash
