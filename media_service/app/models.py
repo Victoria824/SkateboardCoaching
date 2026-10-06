@@ -51,6 +51,9 @@ class Video(Base):
     review_items: Mapped[List["ReviewItem"]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+    sanitized_exports: Mapped[List["SanitizedExport"]] = relationship(
+        back_populates="video", cascade="all, delete-orphan"
+    )
 
 
 class Frame(Base):
@@ -87,6 +90,9 @@ class ProcessingJob(Base):
     model_run_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("model_runs.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    sanitized_export_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("sanitized_exports.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     state: Mapped[str] = mapped_column(String(50), default="QUEUED", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
@@ -101,6 +107,33 @@ class ProcessingJob(Base):
 
     video: Mapped[Video] = relationship(back_populates="jobs")
     model_run: Mapped[Optional["ModelRun"]] = relationship(back_populates="job")
+    sanitized_export: Mapped[Optional["SanitizedExport"]] = relationship(back_populates="job")
+
+
+class SanitizedExport(Base):
+    __tablename__ = "sanitized_exports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_tasks.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(50), default="QUEUED", index=True)
+    labels: Mapped[List[str]] = mapped_column(JSON, default=list)
+    source_annotation_count: Mapped[int] = mapped_column(Integer, default=0)
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    manifest_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    output_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    video: Mapped[Video] = relationship(back_populates="sanitized_exports")
+    task: Mapped["AnnotationTask"] = relationship()
+    job: Mapped[Optional[ProcessingJob]] = relationship(
+        back_populates="sanitized_export", uselist=False
+    )
 
 
 class AnnotationTask(Base):

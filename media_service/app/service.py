@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from typing import List, Optional, Sequence
@@ -8,7 +9,8 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .inference import InferenceError, PredictionOutput, PredictionProvider, UltralyticsProvider
 from .media import FFmpegProcessor, MediaProcessingError
-from .models import Frame, ModelPrediction, ModelRun, ProcessingJob, Video
+from .models import Annotation, Frame, ModelPrediction, ModelRun, ProcessingJob, SanitizedExport, Video
+from .privacy import build_blur_segments, build_ffmpeg_blur_filter, segment_manifest, sha256_file
 from .quality import route_model_run_reviews
 from .storage import LocalStorage
 from .tracking import associate_people_and_boards
@@ -41,7 +43,10 @@ def claim_next_job(session: Session) -> Optional[str]:
     if candidate is None:
         return None
 
-    claimed_state = "RUNNING_INFERENCE" if candidate.job_type == "MODEL_INFERENCE" else "PROCESSING_VIDEO"
+    claimed_state = {
+        "MODEL_INFERENCE": "RUNNING_INFERENCE",
+        "PII_SANITIZATION": "SANITIZING_VIDEO",
+    }.get(candidate.job_type, "PROCESSING_VIDEO")
     result = session.execute(
         update(ProcessingJob)
         .where(
@@ -291,3 +296,118 @@ def process_inference_job(
     except Exception as error:
         record_inference_failure(session, job_id, "UNEXPECTED_INFERENCE_ERROR", str(error))
         logger.exception("Unexpected inference failure", extra={"job_id": job_id})
+
+
+def record_sanitization_failure(session: Session, job_id: str, code: str, message: str) -> None:
+    session.rollback()
+    job = session.get(ProcessingJob, job_id)
+    item = session.get(SanitizedExport, job.sanitized_export_id) if job and job.sanitized_export_id else None
+    if job:
+        job.state = "FAILED"
+        job.error_code = code
+        job.error_message = message[-2000:]
+        job.progress = 0
+    if item:
+        item.status = "FAILED"
+        item.error_code = code
+        item.error_message = message[-2000:]
+    session.commit()
+
+
+def process_sanitization_job(
+    session: Session,
+    job_id: str,
+    processor: Optional[FFmpegProcessor] = None,
+    storage: Optional[LocalStorage] = None,
+) -> None:
+    processor = processor or FFmpegProcessor()
+    storage = storage or LocalStorage()
+    job = session.get(ProcessingJob, job_id)
+    if job is None or job.sanitized_export_id is None:
+        raise ValueError("Sanitization job is missing its export")
+    item = session.get(SanitizedExport, job.sanitized_export_id)
+    if item is None:
+        raise ValueError("Unknown sanitized export")
+    try:
+        item.status = "RUNNING"
+        job.state = "SANITIZING_VIDEO"
+        job.progress = 10
+        session.commit()
+        annotations = list(
+            session.scalars(
+                select(Annotation).where(
+                    Annotation.task_id == item.task_id,
+                    Annotation.annotation_type == "bbox",
+                    Annotation.label.in_(item.labels),
+                )
+            ).all()
+        )
+        if not annotations:
+            raise MediaProcessingError("NO_PII_REGIONS", "No PII annotations remain for export")
+        if not item.video.width or not item.video.height:
+            raise MediaProcessingError("MISSING_VIDEO_DIMENSIONS", "Video dimensions are unavailable")
+        segments = build_blur_segments(item.video, annotations)
+        filter_graph, output_label = build_ffmpeg_blur_filter(segments)
+        destination = storage.sanitized_video_path(item.id)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            settings.ffmpeg_binary,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(storage.absolute_path(item.video.storage_path)),
+            "-filter_complex",
+            filter_graph,
+            "-map",
+            output_label,
+            "-map",
+            "0:a?",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "20",
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(destination),
+        ]
+        processor._run(command, "SANITIZATION_FAILED")
+        job.progress = 90
+        output_sha256 = sha256_file(destination)
+        manifest_path = storage.sanitized_manifest_path(item.id)
+        manifest = {
+            "schema_version": "1.0",
+            "export_id": item.id,
+            "video_id": item.video_id,
+            "task_id": item.task_id,
+            "source_sha256": sha256_file(storage.absolute_path(item.video.storage_path)),
+            "output_sha256": output_sha256,
+            "labels": item.labels,
+            "source_annotation_count": len(annotations),
+            "segments": [segment_manifest(segment) for segment in segments],
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        completed_at = datetime.utcnow()
+        item.storage_path = storage.relative_path(destination)
+        item.manifest_path = storage.relative_path(manifest_path)
+        item.output_sha256 = output_sha256
+        item.source_annotation_count = len(annotations)
+        item.status = "COMPLETED"
+        item.completed_at = completed_at
+        job.state = "COMPLETED"
+        job.progress = 100
+        job.completed_at = completed_at
+        session.commit()
+    except MediaProcessingError as error:
+        record_sanitization_failure(session, job_id, error.code, str(error))
+    except Exception as error:
+        record_sanitization_failure(session, job_id, "UNEXPECTED_SANITIZATION_ERROR", str(error))

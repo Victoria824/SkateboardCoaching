@@ -24,6 +24,12 @@ class LocalStorage:
     def frame_directory(self, video_id: str) -> Path:
         return self.root / "frames" / video_id
 
+    def sanitized_video_path(self, export_id: str) -> Path:
+        return self.root / "sanitized" / export_id / "sanitized.mp4"
+
+    def sanitized_manifest_path(self, export_id: str) -> Path:
+        return self.root / "sanitized" / export_id / "manifest.json"
+
     def relative_path(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()
 

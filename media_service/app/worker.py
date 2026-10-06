@@ -4,7 +4,7 @@ import time
 
 from .config import settings
 from .database import SessionLocal
-from .service import claim_next_job, process_inference_job, process_job
+from .service import claim_next_job, process_inference_job, process_job, process_sanitization_job
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -30,6 +30,8 @@ def run() -> None:
                 job = session.get(ProcessingJob, job_id)
                 if job and job.job_type == "MODEL_INFERENCE":
                     process_inference_job(session, job_id)
+                elif job and job.job_type == "PII_SANITIZATION":
+                    process_sanitization_job(session, job_id)
                 else:
                     process_job(session, job_id)
             else:

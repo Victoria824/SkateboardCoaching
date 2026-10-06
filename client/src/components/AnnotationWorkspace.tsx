@@ -33,13 +33,16 @@ import {
   ModelMetrics,
   ModelPrediction,
   ModelRun,
+  SanitizedExport,
   completeAnnotationTask,
+  createSanitizedExport,
   createModelRun,
   getAnnotationTask,
   getFrameAnnotations,
   getFramePredictions,
   getModelMetrics,
   getModelRun,
+  getSanitizedExport,
   getVideoModelRuns,
   mediaUrl,
   propagateTrackPrediction,
@@ -86,6 +89,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [propagationRadius, setPropagationRadius] = useState(2);
+  const [sanitizedExport, setSanitizedExport] = useState<SanitizedExport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const frameStartedAt = useRef(Date.now());
@@ -167,6 +171,21 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [frame, modelRun]);
+
+  useEffect(() => {
+    if (!sanitizedExport || !['QUEUED', 'RUNNING'].includes(sanitizedExport.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await getSanitizedExport(sanitizedExport.id);
+        setSanitizedExport(next);
+        if (next.status === 'COMPLETED') setMessage('Privacy-safe video export is ready');
+        if (next.status === 'FAILED') setError(next.error_message || 'Privacy export failed.');
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to read privacy export.');
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [sanitizedExport]);
 
   const normalizedPoint = (event: ReactPointerEvent<SVGSVGElement | SVGElement>) => {
     const bounds = svgRef.current?.getBoundingClientRect();
@@ -464,6 +483,19 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     }
   };
 
+  const exportSanitizedVideo = async () => {
+    const video = task?.video;
+    if (!video) return;
+    if (dirty && !await save()) return;
+    setError(null);
+    try {
+      setSanitizedExport(await createSanitizedExport(video.id, taskId));
+      setMessage('Privacy-safe export queued');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to create privacy export.');
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -680,6 +712,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                 <MenuItem value="rider">Rider</MenuItem>
                 <MenuItem value="snowboard">Snowboard</MenuItem>
                 <MenuItem value="helmet">Helmet</MenuItem>
+                <MenuItem value="face">PII · Face</MenuItem>
+                <MenuItem value="license_plate">PII · License plate</MenuItem>
+                <MenuItem value="screen">PII · Screen</MenuItem>
               </Select>
             </FormControl>
           ) : (
@@ -693,6 +728,20 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Button variant="contained" startIcon={<Save />} disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save frame'}</Button>
             <Button color="error" startIcon={<Delete />} disabled={!selectedId} onClick={deleteSelected}>Delete selected</Button>
             <Button variant="outlined" color="success" disabled={task.status === 'COMPLETED'} onClick={completeTask}>Complete task</Button>
+            <Button
+              variant="outlined"
+              disabled={sanitizedExport?.status === 'QUEUED' || sanitizedExport?.status === 'RUNNING'}
+              onClick={exportSanitizedVideo}
+            >
+              {sanitizedExport && ['QUEUED', 'RUNNING'].includes(sanitizedExport.status)
+                ? 'Sanitizing…' : 'Export privacy-safe video'}
+            </Button>
+            {sanitizedExport?.status === 'COMPLETED' && sanitizedExport.video_url && (
+              <Button href={mediaUrl(sanitizedExport.video_url)} target="_blank">Download sanitized video</Button>
+            )}
+            {sanitizedExport?.status === 'COMPLETED' && sanitizedExport.manifest_url && (
+              <Button href={mediaUrl(sanitizedExport.manifest_url)} target="_blank">Open export manifest</Button>
+            )}
           </Stack>
           <Typography variant="body2" color="text.secondary" mt={2}>
             A accept · C correct · R reject · B/K tools · ←/→ frames · Shift+←/→ jump 10 · Delete removes · Ctrl/Cmd+S saves

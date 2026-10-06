@@ -25,6 +25,10 @@ Milestone 4C adds reviewer-controlled correction propagation with a complete aud
 versioned gold-label format for real precision, recall, IoU, and association scoring. See
 [the gold evaluation workflow](docs/gold-evaluation.md).
 
+Milestone 5A adds reviewer-authored face, license-plate, and screen regions plus asynchronous
+privacy-safe video export. The worker applies time-bounded local blur and writes a checksum-backed
+audit manifest. See [the privacy export workflow](docs/privacy-sanitization.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

@@ -19,6 +19,8 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
   after a persisted snowboard association or association-backed track confirmation.
 - Reviewers can propagate an accepted or corrected tracked box across a bounded frame range; every
   generated annotation and prediction decision links to an immutable propagation audit record.
+- Face, license-plate, and screen annotations can be exported through an asynchronous FFmpeg
+  sanitization job that preserves audio and emits a checksum-backed JSON manifest.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 

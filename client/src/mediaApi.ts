@@ -79,6 +79,20 @@ export interface TrackPropagationResult {
   frame_ids: string[];
 }
 
+export interface SanitizedExport {
+  id: string;
+  video_id: string;
+  task_id: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  labels: string[];
+  source_annotation_count: number;
+  video_url?: string | null;
+  manifest_url?: string | null;
+  output_sha256?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 export interface ModelRun {
   id: string;
   video_id: string;
@@ -262,6 +276,26 @@ export async function saveFrameAnnotations(
 export async function completeAnnotationTask(taskId: string): Promise<AnnotationTask> {
   return parseResponse<AnnotationTask>(
     await fetch(`${MEDIA_API_BASE_URL}/api/annotation-tasks/${taskId}/complete`, { method: 'POST' })
+  );
+}
+
+export async function createSanitizedExport(
+  videoId: string,
+  taskId: string
+): Promise<SanitizedExport> {
+  const payload = await parseResponse<{ sanitized_export: SanitizedExport }>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/sanitized-exports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId }),
+    })
+  );
+  return payload.sanitized_export;
+}
+
+export async function getSanitizedExport(exportId: string): Promise<SanitizedExport> {
+  return parseResponse<SanitizedExport>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/sanitized-exports/${exportId}`)
   );
 }
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from .api.inference import router as inference_router
 from .api.quality import router as quality_router
+from .api.privacy import router as privacy_router
 from .config import settings
 from .database import get_session
 from .models import (
@@ -57,6 +58,7 @@ app.add_middleware(
 app.mount(settings.public_media_url, StaticFiles(directory=str(settings.media_root)), name="media")
 app.include_router(inference_router)
 app.include_router(quality_router)
+app.include_router(privacy_router)
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}

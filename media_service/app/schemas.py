@@ -51,6 +51,34 @@ class JobResponse(BaseModel):
     completed_at: Optional[datetime]
 
 
+class SanitizedExportRequest(BaseModel):
+    task_id: str
+    labels: List[Literal["face", "license_plate", "screen"]] = Field(
+        default_factory=lambda: ["face", "license_plate", "screen"]
+    )
+
+
+class SanitizedExportResponse(BaseModel):
+    id: str
+    video_id: str
+    task_id: str
+    status: str
+    labels: List[str]
+    source_annotation_count: int
+    video_url: Optional[str]
+    manifest_url: Optional[str]
+    output_sha256: Optional[str]
+    error_code: Optional[str]
+    error_message: Optional[str]
+    created_at: datetime
+    completed_at: Optional[datetime]
+
+
+class SanitizedExportCreatedResponse(BaseModel):
+    sanitized_export: SanitizedExportResponse
+    job: JobResponse
+
+
 class UploadResponse(BaseModel):
     video: VideoResponse
     job: JobResponse
