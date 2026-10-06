@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_session
 from ..models import (
     Annotation,
@@ -68,11 +69,24 @@ def create_model_run(
         raise HTTPException(status_code=404, detail="Video not found")
     if video.status != "READY_FOR_ANNOTATION" or not video.frames:
         raise HTTPException(status_code=409, detail="Video frames are not ready for inference")
-    default_model = "yolo11n-pose.pt" if request.model_kind == "pose" else "yolo11n.pt"
+    default_model = {
+        "pose": "yolo11n-pose.pt",
+        "pii": "opencv-haar+{}".format(settings.pii_screen_model),
+    }.get(request.model_kind, "yolo11n.pt")
+    provider = "opencv+ultralytics" if request.model_kind == "pii" else request.provider
+    if request.model_kind == "pii":
+        privacy_task = session.scalar(
+            select(AnnotationTask)
+            .where(AnnotationTask.video_id == video.id, AnnotationTask.status != "COMPLETED")
+            .order_by(AnnotationTask.created_at.desc())
+            .limit(1)
+        )
+        if privacy_task is None:
+            session.add(AnnotationTask(video=video, status="PENDING", priority=100))
     model_run = ModelRun(
         video=video,
         model_kind=request.model_kind,
-        provider=request.provider,
+        provider=provider,
         model_name=request.model_name or default_model,
         model_version=request.model_version,
         device=request.device,

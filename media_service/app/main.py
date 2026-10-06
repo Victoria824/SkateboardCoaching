@@ -1,4 +1,7 @@
 import logging
+import json
+import time
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
@@ -11,6 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .api.inference import router as inference_router
+from .api.exports import router as exports_router
+from .api.operations import router as operations_router
 from .api.quality import router as quality_router
 from .api.privacy import router as privacy_router
 from .config import settings
@@ -57,8 +62,32 @@ app.add_middleware(
 )
 app.mount(settings.public_media_url, StaticFiles(directory=str(settings.media_root)), name="media")
 app.include_router(inference_router)
+app.include_router(exports_router)
+app.include_router(operations_router)
 app.include_router(quality_router)
 app.include_router(privacy_router)
+
+
+@app.middleware("http")
+async def request_observability(request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    started = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    response.headers["X-Request-ID"] = request_id
+    logging.getLogger("media.request").info(
+        json.dumps(
+            {
+                "event": "http_request",
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+            }
+        )
+    )
+    return response
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}

@@ -1,26 +1,15 @@
 # Media ingestion architecture
 
 ```text
-React client
-    |
-    | POST /api/videos (streamed upload)
-    v
-FastAPI media service ------> shared object/local storage
-    |
-    | creates video + QUEUED job, returns 202
-    v
-PostgreSQL / SQLite (development)
-    ^
-    | atomically claims job
-Python media worker
-    |
-    +--> ffprobe metadata
-    +--> FFmpeg frame extraction
-    +--> versioned detection / pose inference
-    +--> timestamped frame records
-    |
-    v
-READY_FOR_ANNOTATION
+React reviewer UI
+  → FastAPI canonical API → PostgreSQL/SQLite audit records
+                         ↘ local/S3-compatible storage boundary
+  → worker: FFmpeg → YOLO/OpenCV → tracking → review queue
+  → human approval → COCO/YOLO or sanitized MP4 + manifest
+
+Legacy Node/Replicate coach
+  → consumes completed FastAPI COCO review output for provenance-backed reports
+  → downstream narrative demo only; never owns canonical labels or privacy state
 ```
 
 ## Service boundaries
@@ -28,7 +17,9 @@ READY_FOR_ANNOTATION
 - FastAPI owns upload validation, persistence, status APIs, idempotency, and media URLs.
 - The worker owns CPU-heavy media commands and state transitions.
 - Storage paths are persisted as keys relative to a configured root, so local storage can later be replaced by S3-compatible object storage without changing API records.
-- The legacy Node backend continues to own the coaching/chat experience during migration.
+- The legacy Node backend owns only the optional coaching/chat demo. Its placeholder-frame path has
+  been removed. `POST /api/coaching/reviewed/{task_id}` consumes only completed FastAPI review
+  output and returns its task/video provenance; all canonical data-platform work belongs in FastAPI.
 
 ## State model
 
@@ -50,5 +41,6 @@ Each job records attempts, progress, stable error code, human-readable failure d
 - Development defaults to SQLite; Docker Compose runs PostgreSQL.
 - Files use a shared local volume. An S3 adapter and presigned direct uploads are the next storage step.
 - The worker polls the database. Redis/Celery is intentionally deferred until workload evidence justifies it.
-- Frame timestamps are derived from the configured constant sampling rate. Variable-rate, scene-based, and keyframe sampling will require timestamp extraction from FFmpeg output.
-- Schema creation currently uses SQLAlchemy metadata. Alembic migrations are required before a shared production deployment.
+- Overview/action/custom sampling and motion-aware bursts persist source timestamps. Scene and
+  keyframe policies remain future sampling options.
+- Schema changes are managed through Alembic and CI verifies the migration head.

@@ -8,9 +8,9 @@ from sqlalchemy.pool import StaticPool
 
 from app import main
 from app.database import Base, get_session
-from app.models import Annotation, AnnotationTask, Frame, SanitizedExport, Video
+from app.models import Annotation, AnnotationTask, Frame, ProcessingJob, SanitizedExport, Video
 from app.privacy import BlurSegment, build_ffmpeg_blur_filter
-from app.service import claim_next_job, process_sanitization_job
+from app.service import claim_next_job, process_sanitization_job, record_sanitization_failure
 from app.storage import LocalStorage
 
 
@@ -91,7 +91,7 @@ def test_privacy_export_api_and_worker_create_audited_artifacts(tmp_path):
         with TestClient(main.app) as client:
             created = client.post(
                 f"/api/videos/{video_id}/sanitized-exports",
-                json={"task_id": task_id},
+                json={"task_id": task_id, "reviewer": "reviewer-a"},
             )
     finally:
         main.app.dependency_overrides.clear()
@@ -108,6 +108,9 @@ def test_privacy_export_api_and_worker_create_audited_artifacts(tmp_path):
         assert item.status == "COMPLETED"
         assert item.output_sha256
         assert manifest["source_annotation_count"] == 1
+        assert manifest["reviewer"] == "reviewer-a"
+        assert manifest["status"] == "COMPLETED"
+        assert manifest["processing_ms"] >= 0
         assert manifest["segments"][0]["label"] == "face"
         assert manifest["segments"][0]["pixel_geometry"] == {
             "x": 64,
@@ -118,3 +121,37 @@ def test_privacy_export_api_and_worker_create_audited_artifacts(tmp_path):
         assert "-filter_complex" in processor.command
         assert processor.command[processor.command.index("-map_metadata") + 1] == "-1"
         assert processor.command[processor.command.index("-map_chapters") + 1] == "-1"
+
+
+def test_sanitization_failure_writes_audit_manifest(tmp_path):
+    Session = make_database()
+    storage = LocalStorage(tmp_path)
+    with Session() as session:
+        video = Video(filename="ride.mp4", storage_path="videos/ride.mp4", file_size=10)
+        task = AnnotationTask(video=video, status="COMPLETED")
+        item = SanitizedExport(
+            video=video,
+            task=task,
+            status="RUNNING",
+            labels=["face"],
+            reviewer="reviewer-a",
+        )
+        job = ProcessingJob(
+            video=video,
+            sanitized_export=item,
+            job_type="PII_SANITIZATION",
+            state="SANITIZING_VIDEO",
+        )
+        session.add_all([video, task, item, job])
+        session.commit()
+
+        record_sanitization_failure(
+            session, job.id, "SANITIZATION_FAILED", "ffmpeg failed", storage
+        )
+        session.refresh(item)
+        manifest = json.loads(storage.absolute_path(item.manifest_path).read_text())
+
+        assert item.status == "FAILED"
+        assert manifest["status"] == "FAILED"
+        assert manifest["reviewer"] == "reviewer-a"
+        assert manifest["error_code"] == "SANITIZATION_FAILED"

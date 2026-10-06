@@ -17,6 +17,7 @@ class Settings:
     worker_poll_seconds: float
     ffmpeg_binary: str
     ffprobe_binary: str
+    pii_screen_model: str
     cors_origins: tuple
 
     @classmethod
@@ -36,6 +37,7 @@ class Settings:
             worker_poll_seconds=float(os.getenv("MEDIA_WORKER_POLL_SECONDS", "1")),
             ffmpeg_binary=os.getenv("FFMPEG_BINARY", "ffmpeg"),
             ffprobe_binary=os.getenv("FFPROBE_BINARY", "ffprobe"),
+            pii_screen_model=os.getenv("MEDIA_PII_SCREEN_MODEL", "yolo11n.pt"),
             cors_origins=tuple(
                 origin.strip()
                 for origin in os.getenv("MEDIA_CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -45,4 +47,3 @@ class Settings:
 
 
 settings = Settings.from_environment()
-

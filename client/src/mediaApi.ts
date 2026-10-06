@@ -89,6 +89,8 @@ export interface SanitizedExport {
   video_url?: string | null;
   manifest_url?: string | null;
   output_sha256?: string | null;
+  reviewer?: string | null;
+  processing_ms?: number | null;
   error_code?: string | null;
   error_message?: string | null;
 }
@@ -96,7 +98,7 @@ export interface SanitizedExport {
 export interface ModelRun {
   id: string;
   video_id: string;
-  model_kind: 'detection' | 'pose';
+  model_kind: 'detection' | 'pose' | 'pii';
   provider: string;
   model_name: string;
   model_version: string;
@@ -281,13 +283,14 @@ export async function completeAnnotationTask(taskId: string): Promise<Annotation
 
 export async function createSanitizedExport(
   videoId: string,
-  taskId: string
+  taskId: string,
+  reviewer: string
 ): Promise<SanitizedExport> {
   const payload = await parseResponse<{ sanitized_export: SanitizedExport }>(
     await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/sanitized-exports`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId }),
+      body: JSON.stringify({ task_id: taskId, reviewer }),
     })
   );
   return payload.sanitized_export;
@@ -299,9 +302,15 @@ export async function getSanitizedExport(exportId: string): Promise<SanitizedExp
   );
 }
 
+export const sanitizedBundleUrl = (exportId: string) =>
+  `${MEDIA_API_BASE_URL}/api/sanitized-exports/${exportId}/bundle`;
+
+export const taskExportUrl = (taskId: string, format: 'coco' | 'yolo') =>
+  `${MEDIA_API_BASE_URL}/api/annotation-tasks/${taskId}/exports/${format}`;
+
 export async function createModelRun(
   videoId: string,
-  modelKind: 'detection' | 'pose'
+  modelKind: 'detection' | 'pose' | 'pii'
 ): Promise<{ model_run: ModelRun; job: ProcessingJob }> {
   return parseResponse<{ model_run: ModelRun; job: ProcessingJob }>(
     await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/model-runs`, {

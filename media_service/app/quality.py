@@ -108,6 +108,16 @@ def route_model_run_reviews(
     )
     created = 0
     for prediction in predictions:
+        if model_run.model_kind == "pii":
+            created += _add_review(
+                session,
+                model_run,
+                prediction,
+                "PII_APPROVAL_REQUIRED",
+                "HIGH",
+                prediction.confidence,
+                {"track_id": prediction.track_id, "label": prediction.label},
+            )
         if prediction.confidence < low_confidence_threshold:
             created += _add_review(
                 session,

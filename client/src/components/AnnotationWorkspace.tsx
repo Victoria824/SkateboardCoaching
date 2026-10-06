@@ -11,6 +11,7 @@ import {
   Paper,
   Select,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import {
@@ -48,6 +49,8 @@ import {
   propagateTrackPrediction,
   rejectModelPrediction,
   saveFrameAnnotations,
+  sanitizedBundleUrl,
+  taskExportUrl,
 } from '../mediaApi';
 import { predictionToAnnotation, updatePredictionStatus } from '../annotation/predictionState';
 
@@ -90,6 +93,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [message, setMessage] = useState<string | null>(null);
   const [propagationRadius, setPropagationRadius] = useState(2);
   const [sanitizedExport, setSanitizedExport] = useState<SanitizedExport | null>(null);
+  const [privacyReviewer, setPrivacyReviewer] = useState('');
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const frameStartedAt = useRef(Date.now());
@@ -107,6 +111,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     getAnnotationTask(taskId)
       .then(async (loadedTask) => {
         setTask(loadedTask);
+        setPrivacyReviewer(loadedTask.assigned_to || '');
         if (loadedTask.video) {
           const runs = await getVideoModelRuns(loadedTask.video.id);
           const latestRun = runs[0];
@@ -342,7 +347,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setDirty(true);
   }, [selectedId]);
 
-  const runInference = async (modelKind: 'detection' | 'pose') => {
+  const runInference = async (modelKind: 'detection' | 'pose' | 'pii') => {
     if (!task?.video) return;
     setError(null);
     setMessage(null);
@@ -489,7 +494,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     if (dirty && !await save()) return;
     setError(null);
     try {
-      setSanitizedExport(await createSanitizedExport(video.id, taskId));
+      setSanitizedExport(await createSanitizedExport(video.id, taskId, privacyReviewer.trim()));
       setMessage('Privacy-safe export queued');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create privacy export.');
@@ -641,6 +646,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
           <Stack direction="row" spacing={1} mb={1}>
             <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('detection')}>Detect</Button>
             <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('pose')}>Pose</Button>
+            <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('pii')}>PII</Button>
           </Stack>
           {modelRun && (
             <Box mb={2}>
@@ -728,9 +734,21 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Button variant="contained" startIcon={<Save />} disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save frame'}</Button>
             <Button color="error" startIcon={<Delete />} disabled={!selectedId} onClick={deleteSelected}>Delete selected</Button>
             <Button variant="outlined" color="success" disabled={task.status === 'COMPLETED'} onClick={completeTask}>Complete task</Button>
+            {task.status === 'COMPLETED' && (
+              <Stack direction="row" spacing={1}>
+                <Button size="small" href={taskExportUrl(taskId, 'coco')} target="_blank">COCO</Button>
+                <Button size="small" href={taskExportUrl(taskId, 'yolo')} target="_blank">YOLO bundle</Button>
+              </Stack>
+            )}
+            <TextField
+              size="small"
+              label="Privacy reviewer"
+              value={privacyReviewer}
+              onChange={(event) => setPrivacyReviewer(event.target.value)}
+            />
             <Button
               variant="outlined"
-              disabled={sanitizedExport?.status === 'QUEUED' || sanitizedExport?.status === 'RUNNING'}
+              disabled={!privacyReviewer.trim() || task.status !== 'COMPLETED' || sanitizedExport?.status === 'QUEUED' || sanitizedExport?.status === 'RUNNING'}
               onClick={exportSanitizedVideo}
             >
               {sanitizedExport && ['QUEUED', 'RUNNING'].includes(sanitizedExport.status)
@@ -741,6 +759,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             )}
             {sanitizedExport?.status === 'COMPLETED' && sanitizedExport.manifest_url && (
               <Button href={mediaUrl(sanitizedExport.manifest_url)} target="_blank">Open export manifest</Button>
+            )}
+            {sanitizedExport?.status === 'COMPLETED' && (
+              <Button href={sanitizedBundleUrl(sanitizedExport.id)} target="_blank">Download sanitized bundle</Button>
             )}
           </Stack>
           <Typography variant="body2" color="text.secondary" mt={2}>

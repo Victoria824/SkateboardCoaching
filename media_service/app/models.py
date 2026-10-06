@@ -124,6 +124,8 @@ class SanitizedExport(Base):
     storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     manifest_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reviewer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    processing_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

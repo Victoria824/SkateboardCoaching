@@ -1,6 +1,7 @@
 # Snowboard Vision Media Service
 
-This service is the first infrastructure slice of the Snowboard Vision Data Platform. It preserves the existing Node coaching backend while introducing a reliable, asynchronous path for video ingestion and real frame extraction.
+This service is the canonical backend of the Snowboard Vision Data Platform. The optional
+Node/Replicate coaching adapter consumes completed review output downstream.
 
 ## What it provides
 
@@ -19,8 +20,14 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
   after a persisted snowboard association or association-backed track confirmation.
 - Reviewers can propagate an accepted or corrected tracked box across a bounded frame range; every
   generated annotation and prediction decision links to an immutable propagation audit record.
-- Face, license-plate, and screen annotations can be exported through an asynchronous FFmpeg
-  sanitization job that preserves audio and emits a checksum-backed JSON manifest.
+- OpenCV proposes faces and license plates, YOLO proposes common screen devices, and geometry
+  tracking assigns temporal PII identities. Every proposal is routed to human review.
+- A completed privacy task with no unresolved PII proposals can queue an asynchronous FFmpeg
+  sanitization job. Its manifest records reviewer, model versions, track IDs, checksums, duration,
+  and failure state; completed outputs are downloadable as a bundle.
+- Completed tasks export to COCO JSON or a YOLO image/label bundle.
+- Every HTTP response carries `X-Request-ID`; `/api/operations/metrics` reports failure rate and
+  per-job-type duration. Docker Compose starts two atomically claiming workers.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -43,6 +50,12 @@ Install the optional real-model runtime before running detection or pose inferen
 
 ```bash
 .venv/bin/pip install -r requirements-ml.txt
+```
+
+Compare PyTorch and ONNX Runtime on a real extracted frame:
+
+```bash
+.venv/bin/python scripts/benchmark_onnx.py data/media/frames/<video>/<frame>.jpg
 ```
 
 ## Real-video evaluation

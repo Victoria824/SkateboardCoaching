@@ -48,6 +48,16 @@ services:
     volumes:
       - media-data:/data/media
 
+  media-worker-2:
+    build: ./media_service
+    command: ["python", "-m", "app.worker"]
+    environment: *media-environment
+    depends_on:
+      media-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - media-data:/data/media
+
 volumes:
   postgres-data:
   media-data:

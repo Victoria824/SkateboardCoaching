@@ -7,7 +7,13 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .inference import InferenceError, PredictionOutput, PredictionProvider, UltralyticsProvider
+from .inference import (
+    InferenceError,
+    OpenCVPIIProvider,
+    PredictionOutput,
+    PredictionProvider,
+    UltralyticsProvider,
+)
 from .media import FFmpegProcessor, MediaProcessingError
 from .models import Annotation, Frame, ModelPrediction, ModelRun, ProcessingJob, SanitizedExport, Video
 from .privacy import build_blur_segments, build_ffmpeg_blur_filter, segment_manifest, sha256_file
@@ -214,7 +220,11 @@ def process_inference_job(
         raise ValueError("Unknown model run {}".format(job.model_run_id))
 
     try:
-        provider = provider or UltralyticsProvider(model_run.model_name)
+        provider = provider or (
+            OpenCVPIIProvider(settings.pii_screen_model)
+            if model_run.model_kind == "pii"
+            else UltralyticsProvider(model_run.model_name)
+        )
         model_run.status = "RUNNING"
         model_run.started_at = datetime.utcnow()
         model_run.total_frames = len(model_run.video.frames)
@@ -279,9 +289,12 @@ def process_inference_job(
                 prediction.label = "rider"
 
         completed_at = datetime.utcnow()
-        model_run.model_version = "{}+ultralytics-{}".format(
-            model_run.model_version, provider.runtime_version
+        runtime_version = (
+            provider.runtime_version
+            if model_run.model_kind == "pii"
+            else "ultralytics-{}".format(provider.runtime_version)
         )
+        model_run.model_version = "{}+{}".format(model_run.model_version, runtime_version)
         model_run.latency_ms = round((completed_at - started_at).total_seconds() * 1000)
         model_run.status = "COMPLETED"
         model_run.completed_at = completed_at
@@ -298,7 +311,13 @@ def process_inference_job(
         logger.exception("Unexpected inference failure", extra={"job_id": job_id})
 
 
-def record_sanitization_failure(session: Session, job_id: str, code: str, message: str) -> None:
+def record_sanitization_failure(
+    session: Session,
+    job_id: str,
+    code: str,
+    message: str,
+    storage: Optional[LocalStorage] = None,
+) -> None:
     session.rollback()
     job = session.get(ProcessingJob, job_id)
     item = session.get(SanitizedExport, job.sanitized_export_id) if job and job.sanitized_export_id else None
@@ -311,6 +330,34 @@ def record_sanitization_failure(session: Session, job_id: str, code: str, messag
         item.status = "FAILED"
         item.error_code = code
         item.error_message = message[-2000:]
+        storage = storage or LocalStorage()
+        manifest_path = storage.sanitized_manifest_path(item.id)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        failed_at = datetime.utcnow()
+        item.processing_ms = round(
+            (failed_at - ((job.started_at if job else None) or item.created_at)).total_seconds()
+            * 1000
+        )
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "FAILED",
+                    "export_id": item.id,
+                    "video_id": item.video_id,
+                    "task_id": item.task_id,
+                    "reviewer": item.reviewer,
+                    "error_code": code,
+                    "error_message": message[-2000:],
+                    "failed_at": failed_at.isoformat() + "Z",
+                    "processing_ms": item.processing_ms,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        item.manifest_path = storage.relative_path(manifest_path)
     session.commit()
 
 
@@ -384,23 +431,57 @@ def process_sanitization_job(
         job.progress = 90
         output_sha256 = sha256_file(destination)
         manifest_path = storage.sanitized_manifest_path(item.id)
+        completed_at = datetime.utcnow()
+        processing_ms = round(
+            (completed_at - (job.started_at or item.created_at)).total_seconds() * 1000
+        )
+        source_predictions = [
+            session.get(ModelPrediction, annotation.model_prediction_id)
+            for annotation in annotations
+            if annotation.model_prediction_id
+        ]
+        source_predictions = [prediction for prediction in source_predictions if prediction]
+        models = {
+            prediction.model_run.id: {
+                "run_id": prediction.model_run.id,
+                "provider": prediction.model_run.provider,
+                "model_name": prediction.model_run.model_name,
+                "model_version": prediction.model_run.model_version,
+                "parameters": prediction.model_run.parameters,
+            }
+            for prediction in source_predictions
+        }
+        tracks = sorted(
+            {
+                prediction.track_id
+                for prediction in source_predictions
+                if prediction.track_id is not None
+            }
+        )
         manifest = {
             "schema_version": "1.0",
+            "status": "COMPLETED",
             "export_id": item.id,
             "video_id": item.video_id,
             "task_id": item.task_id,
             "source_sha256": sha256_file(storage.absolute_path(item.video.storage_path)),
             "output_sha256": output_sha256,
             "labels": item.labels,
+            "reviewer": item.reviewer,
+            "models": list(models.values()),
+            "blurred_track_ids": tracks,
             "source_annotation_count": len(annotations),
             "segments": [segment_manifest(segment) for segment in segments],
+            "started_at": (job.started_at or item.created_at).isoformat() + "Z",
+            "completed_at": completed_at.isoformat() + "Z",
+            "processing_ms": processing_ms,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        completed_at = datetime.utcnow()
         item.storage_path = storage.relative_path(destination)
         item.manifest_path = storage.relative_path(manifest_path)
         item.output_sha256 = output_sha256
         item.source_annotation_count = len(annotations)
+        item.processing_ms = processing_ms
         item.status = "COMPLETED"
         item.completed_at = completed_at
         job.state = "COMPLETED"
@@ -408,6 +489,8 @@ def process_sanitization_job(
         job.completed_at = completed_at
         session.commit()
     except MediaProcessingError as error:
-        record_sanitization_failure(session, job_id, error.code, str(error))
+        record_sanitization_failure(session, job_id, error.code, str(error), storage)
     except Exception as error:
-        record_sanitization_failure(session, job_id, "UNEXPECTED_SANITIZATION_ERROR", str(error))
+        record_sanitization_failure(
+            session, job_id, "UNEXPECTED_SANITIZATION_ERROR", str(error), storage
+        )

@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_session
-from ..models import Annotation, AnnotationTask, ProcessingJob, SanitizedExport, Video
+from ..models import (
+    Annotation,
+    AnnotationTask,
+    ModelPrediction,
+    ModelRun,
+    ProcessingJob,
+    SanitizedExport,
+    Video,
+)
 from ..privacy import PII_LABELS
 from ..schemas import (
     JobResponse,
@@ -38,6 +46,8 @@ def export_response(item: SanitizedExport) -> SanitizedExportResponse:
             else None
         ),
         output_sha256=item.output_sha256,
+        reviewer=item.reviewer,
+        processing_ms=item.processing_ms,
         error_code=item.error_code,
         error_message=item.error_message,
         created_at=item.created_at,
@@ -61,6 +71,8 @@ def create_sanitized_export(
         raise HTTPException(status_code=404, detail="Video not found")
     if task is None or task.video_id != video.id:
         raise HTTPException(status_code=404, detail="Annotation task does not belong to video")
+    if task.status != "COMPLETED":
+        raise HTTPException(status_code=409, detail="Complete the privacy review task before export")
     labels = sorted(set(request.labels))
     if not labels or not set(labels).issubset(PII_LABELS):
         raise HTTPException(status_code=422, detail="At least one supported PII label is required")
@@ -75,11 +87,24 @@ def create_sanitized_export(
     )
     if annotation_count == 0:
         raise HTTPException(status_code=409, detail="Task has no matching PII annotations")
+    pending_pii = session.scalar(
+        select(ModelPrediction.id)
+        .join(ModelRun)
+        .where(
+            ModelRun.video_id == video.id,
+            ModelRun.model_kind == "pii",
+            ModelPrediction.status == "PENDING",
+        )
+        .limit(1)
+    )
+    if pending_pii:
+        raise HTTPException(status_code=409, detail="Resolve all PII predictions before export")
     sanitized_export = SanitizedExport(
         video=video,
         task=task,
         status="QUEUED",
         labels=labels,
+        reviewer=request.reviewer,
         source_annotation_count=annotation_count,
     )
     job = ProcessingJob(

@@ -1,8 +1,12 @@
-# 🏂 Snowboard Coach AI
+# 🏂 Snowboard Vision Data Platform
 
-An AI-powered snowboarding coaching platform that analyzes your snowboarding videos and provides personalized coaching advice using Replicate's advanced AI models.
+The primary system is a FastAPI/React computer-vision data platform for real video ingestion,
+versioned local inference, human review, dataset quality, privacy sanitization, and auditable export.
+The original Node/Replicate snowboard coach remains under `server/` as a legacy downstream demo;
+it is not the source of truth for media, annotations, model predictions, or privacy decisions.
 
-The repository is evolving into a **Snowboard Vision Data Platform**. Milestone 1 adds a FastAPI media service, a separate worker, persistent video/job/frame records, real FFmpeg extraction, and a browser progress view without removing the existing coaching workflow. See [the media service guide](media_service/README.md) and [architecture](docs/media-architecture.md).
+FastAPI owns the canonical pipeline. See [the media service guide](media_service/README.md) and
+[the unified architecture](docs/media-architecture.md).
 
 Milestone 2 adds persisted annotation tasks and a browser workspace for normalized bounding boxes and pose keypoints. It includes frame navigation, drag/resize editing, keyboard shortcuts, save-before-navigation, and per-frame annotation timing. See [the annotation workflow](docs/annotation-workflow.md).
 
@@ -29,10 +33,18 @@ Milestone 5A adds reviewer-authored face, license-plate, and screen regions plus
 privacy-safe video export. The worker applies time-bounded local blur and writes a checksum-backed
 audit manifest. See [the privacy export workflow](docs/privacy-sanitization.md).
 
+Milestone 5B adds local face/license-plate detection, YOLO screen-device proposals, temporal PII
+tracks, automatic approval reviews, a completed-task export gate, reviewer/model/track audit data,
+COCO and YOLO exports, sanitized bundles, request IDs, operational metrics, two-worker Compose, an
+ONNX comparison harness, and GitHub Actions CI.
+
 ## ✨ Features
 
-- **Video Upload**: Drag and drop or click to upload snowboarding videos
-- **AI Analysis**: Advanced video analysis using Replicate's LLaVA and LLaMA models
+- **Primary data platform**: FastAPI, PostgreSQL/SQLite, workers, FFmpeg, local Ultralytics/OpenCV
+- **Human-in-the-loop review**: versioned predictions, tracking, correction propagation, gold metrics
+- **Privacy pipeline**: face/plate/screen proposals, reviewer approval, sanitized video and audit manifest
+- **Dataset delivery**: Gold JSON, COCO JSON, YOLO bundle, and sanitized bundle
+- **Legacy coaching demo**: Replicate LLaVA/LLaMA consumes images and produces narrative coaching
 - **Real-time Chat**: Interactive chatbot for personalized coaching advice
 - **Technical Analysis**: Detailed feedback on:
   - Body position and posture
@@ -43,10 +55,9 @@ audit manifest. See [the privacy export workflow](docs/privacy-sanitization.md).
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Primary platform prerequisites
 
 - Node.js (v16 or higher)
-- Replicate API token
 - FFmpeg (for video processing)
 
 ### Installation
@@ -84,7 +95,7 @@ audit manifest. See [the privacy export workflow](docs/privacy-sanitization.md).
    sudo apt install ffmpeg
    ```
 
-4. **Start the application:**
+4. **Start the legacy coaching demo (optional):**
    ```bash
    npm run dev
    ```
@@ -113,11 +124,14 @@ Alternatively, `docker compose up --build` starts the API, worker, and PostgreSQ
 
 ## 🛠️ Technology Stack
 
-### Backend
-- **Node.js** with Express
-- **Replicate API** for AI video analysis
-- **LLaVA** for image understanding
-- **LLaMA** for text synthesis
+### Primary backend
+- **FastAPI + SQLAlchemy + Alembic** for the canonical API and audit records
+- **Ultralytics YOLO + ByteTrack** for local rider, snowboard, pose, and temporal inference
+- **OpenCV + YOLO** for local face, license-plate, and screen proposals
+- **FFmpeg** for frame extraction and privacy-safe video rendering
+
+### Legacy downstream demo
+- **Node.js/Express + Replicate** for narrative coaching and chat
 - **FFmpeg** for video processing and frame extraction
 - **Multer** for file uploads
 - **CORS** for cross-origin requests

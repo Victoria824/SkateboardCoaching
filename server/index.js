@@ -7,6 +7,7 @@ const Replicate = require('replicate');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { v4: uuidv4 } = require('uuid');
+const fetchJson = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 // Set FFmpeg path
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -101,41 +102,21 @@ const upload = multer({
   }
 });
 
-// Extract frames from video (Vercel-compatible version)
+// Legacy coaching adapter: extract real frames. The FastAPI service is the primary upload path.
 const extractFrames = (videoPath, outputDir) => {
   return new Promise((resolve, reject) => {
-    try {
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-
-      // For Vercel serverless, we'll create a simple test that bypasses frame extraction
-      // and directly calls the pose-based analysis with mock data
-      console.log('Creating test frames for Vercel compatibility...');
-      
-      // Create 5 simple test frame files (minimal PNG data)
-      const minimalPngData = Buffer.from([
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1 pixel
-        0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, // IHDR data
-        0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT chunk
-        0x08, 0x99, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, // IDAT data
-        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82 // IEND chunk
-      ]);
-      
-      for (let i = 1; i <= 5; i++) {
-        const framePath = path.join(outputDir, `frame-${i}.png`);
-        fs.writeFileSync(framePath, minimalPngData);
-      }
-      
-      console.log('Placeholder frames created successfully');
-      resolve();
-    } catch (error) {
-      console.error('Frame extraction error:', error);
-      reject(error);
+    fs.mkdirSync(outputDir, { recursive: true });
+    ffmpeg(videoPath)
+      .outputOptions(['-vf', 'fps=1/2', '-frames:v', '5'])
+      .output(path.join(outputDir, 'frame-%03d.jpg'))
+      .on('end', resolve)
+      .on('error', (error) => {
+        console.error('Frame extraction error:', error);
+        reject(error);
+      })
+      .run();
     }
-  });
+  );
 };
 
 // Convert image to base64
@@ -146,6 +127,51 @@ const imageToBase64 = (imagePath) => {
 
 
 // Routes
+app.post('/api/coaching/reviewed/:taskId', async (req, res) => {
+  try {
+    const mediaApiUrl = process.env.MEDIA_API_URL || 'http://localhost:8000';
+    const sourceUrl = `${mediaApiUrl}/api/annotation-tasks/${req.params.taskId}/exports/coco`;
+    const sourceResponse = await fetchJson(sourceUrl);
+    if (!sourceResponse.ok) {
+      return res.status(sourceResponse.status).json({
+        error: 'Reviewed FastAPI task is not ready',
+        details: await sourceResponse.text()
+      });
+    }
+    const dataset = await sourceResponse.json();
+    const names = Object.fromEntries(dataset.categories.map((item) => [item.id, item.name]));
+    const counts = dataset.annotations.reduce((summary, item) => {
+      const name = names[item.category_id];
+      summary[name] = (summary[name] || 0) + 1;
+      return summary;
+    }, {});
+    const prompt = `As an expert snowboard coach, produce a concise coaching report using only this
+human-reviewed computer-vision summary. Do not invent visual details that are not represented.
+
+Reviewed frames: ${dataset.images.length}
+Reviewed object counts: ${JSON.stringify(counts)}
+Source task: ${dataset.info.task_id}
+
+Explain what can and cannot be concluded, then suggest safe next practice steps.`;
+    const output = await replicate.run(
+      'meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3',
+      { input: { prompt } }
+    );
+    res.json({
+      report: Array.isArray(output) ? output.join(' ') : output,
+      provenance: {
+        source: 'fastapi-reviewed-coco',
+        task_id: dataset.info.task_id,
+        video_id: dataset.info.video_id,
+        annotation_count: dataset.annotations.length
+      }
+    });
+  } catch (error) {
+    console.error('Reviewed coaching report failed:', error);
+    res.status(500).json({ error: 'Failed to generate reviewed coaching report' });
+  }
+});
+
 app.post('/api/upload', upload.single('video'), async (req, res) => {
   try {
     if (!req.file) {
@@ -160,7 +186,7 @@ app.post('/api/upload', upload.single('video'), async (req, res) => {
     
     // Get frame files
     const frameFiles = fs.readdirSync(frameDir)
-      .filter(file => file.endsWith('.png'))
+      .filter(file => /\.(png|jpe?g)$/i.test(file))
       .map(file => path.join(frameDir, file))
       .sort();
 

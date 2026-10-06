@@ -53,6 +53,7 @@ class JobResponse(BaseModel):
 
 class SanitizedExportRequest(BaseModel):
     task_id: str
+    reviewer: str = Field(min_length=1, max_length=255)
     labels: List[Literal["face", "license_plate", "screen"]] = Field(
         default_factory=lambda: ["face", "license_plate", "screen"]
     )
@@ -68,6 +69,8 @@ class SanitizedExportResponse(BaseModel):
     video_url: Optional[str]
     manifest_url: Optional[str]
     output_sha256: Optional[str]
+    reviewer: Optional[str]
+    processing_ms: Optional[int]
     error_code: Optional[str]
     error_message: Optional[str]
     created_at: datetime
@@ -156,8 +159,8 @@ class AnnotationSaveResponse(BaseModel):
 
 
 class ModelRunRequest(BaseModel):
-    model_kind: Literal["detection", "pose"] = "detection"
-    provider: Literal["ultralytics"] = "ultralytics"
+    model_kind: Literal["detection", "pose", "pii"] = "detection"
+    provider: Literal["ultralytics", "opencv+ultralytics"] = "ultralytics"
     model_name: Optional[str] = None
     model_version: str = "pretrained"
     device: str = "cpu"

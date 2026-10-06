@@ -1,6 +1,11 @@
-# Current-state audit
+# Historical current-state audit
 
 Date: 2026-10-01
+
+> Historical baseline: items below describe the repository before the FastAPI data-platform
+> milestones. As of 2026-10-06, real FFmpeg extraction replaced placeholder frames; persisted
+> videos/jobs/models/annotations, automated tests, PII review/export, data exports, and CI exist.
+> Remaining production boundaries are tracked in `docs/production-readiness.md`.
 
 ## What is reusable
 
@@ -9,7 +14,7 @@ Date: 2026-10-01
 - The repository already includes FFmpeg dependencies and understands the concept of sampling frames before inference.
 - Existing coaching functionality can remain available while infrastructure is introduced alongside it.
 
-## Confirmed technical debt
+## Technical debt confirmed at the baseline
 
 1. `server/index.js` does not extract frames. It writes five identical 1×1 PNG placeholders and submits those files to inference.
 2. Upload, frame handling, model inference, response creation, and cleanup share one synchronous HTTP lifecycle.
@@ -25,5 +30,5 @@ Date: 2026-10-01
 
 Keep the coaching product intact for now. Introduce a Python media service and worker beside it, then route future annotation and model-assisted labeling features through the persisted `videos` and `frames` abstraction.
 
-This avoids a high-risk rewrite and creates an independently demonstrable infrastructure slice. Once annotation workflows use the new service, the placeholder path in the Node backend can be retired instead of patched into a second job system.
-
+This avoided a high-risk rewrite. The placeholder path has since been retired, FastAPI is the
+canonical platform, and the Node/Replicate service is an optional downstream coaching adapter.

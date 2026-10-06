@@ -14,6 +14,7 @@ from app.models import (
     ModelPrediction,
     ModelRun,
     ProcessingJob,
+    ReviewItem,
     Video,
 )
 from app.service import claim_next_job, process_inference_job
@@ -69,6 +70,25 @@ class FakeTrackedProvider:
                     external_track_id=7,
                 )
             ],
+        ]
+
+
+class FakePIIProvider:
+    runtime_version = "opencv-test+yolo-test"
+
+    def infer_frames(self, image_paths, model_kind, confidence_threshold, device):
+        assert model_kind == "pii"
+        return [
+            [
+                PredictionOutput(
+                    label="face",
+                    confidence=0.94,
+                    annotation_type="bbox",
+                    geometry={"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+                    external_track_id=4,
+                )
+            ]
+            for _ in image_paths
         ]
 
 
@@ -195,6 +215,63 @@ def test_inference_worker_tracks_and_associates_rider_sequence(tmp_path):
         assert people[0].associated_prediction_id == board.id
         assert board.association_score is not None and board.association_score >= 0.3
         assert model_run.parameters["tracker"] == "ByteTrack+geometry-fallback-v1"
+
+
+def test_pii_inference_tracks_regions_and_routes_approval_reviews(tmp_path):
+    Session = make_database()
+    storage = LocalStorage(tmp_path)
+    with Session() as session:
+        video = Video(
+            filename="privacy.mp4",
+            storage_path="videos/privacy.mp4",
+            file_size=10,
+            status="READY_FOR_ANNOTATION",
+        )
+        frames = [
+            Frame(
+                video=video,
+                frame_number=index,
+                timestamp_ms=(index - 1) * 1000,
+                storage_path=f"frames/privacy/{index}.jpg",
+            )
+            for index in (1, 2)
+        ]
+        model_run = ModelRun(
+            video=video,
+            model_kind="pii",
+            provider="opencv+ultralytics",
+            model_name="opencv-haar+yolo11n.pt",
+            model_version="v1",
+            device="cpu",
+            parameters={"confidence_threshold": 0.25},
+            status="QUEUED",
+        )
+        job = ProcessingJob(
+            video=video,
+            model_run=model_run,
+            job_type="MODEL_INFERENCE",
+            state="QUEUED",
+        )
+        session.add_all([video, *frames, model_run, job])
+        session.commit()
+        for frame in frames:
+            path = storage.absolute_path(frame.storage_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"image")
+
+        process_inference_job(
+            session,
+            claim_next_job(session),
+            provider=FakePIIProvider(),
+            storage=storage,
+        )
+
+        session.refresh(model_run)
+        assert [prediction.label for prediction in model_run.predictions] == ["face", "face"]
+        assert {prediction.track_id for prediction in model_run.predictions} == {"4"}
+        assert model_run.model_version == "v1+opencv-test+yolo-test"
+        reviews = session.query(ReviewItem).filter_by(reason="PII_APPROVAL_REQUIRED").all()
+        assert len(reviews) == 2
 
 
 def test_prediction_accept_correct_reject_and_metrics():

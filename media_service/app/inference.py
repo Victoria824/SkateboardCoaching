@@ -272,3 +272,107 @@ class UltralyticsProvider:
                     )
                 )
         return outputs
+
+
+class OpenCVPIIProvider:
+    """Detect faces/plates with OpenCV cascades and common screen devices with YOLO."""
+
+    def __init__(self, screen_model_name: str = settings.pii_screen_model):
+        try:
+            import cv2
+            import ultralytics
+            from ultralytics import YOLO
+        except ImportError as error:
+            raise InferenceError(
+                "ML_DEPENDENCY_MISSING",
+                "Install requirements-ml.txt to run PII inference",
+            ) from error
+        self.cv2 = cv2
+        self.runtime_version = "opencv-{}+ultralytics-{}".format(
+            cv2.__version__, ultralytics.__version__
+        )
+        cascade_root = Path(cv2.data.haarcascades)
+        self.face = cv2.CascadeClassifier(str(cascade_root / "haarcascade_frontalface_default.xml"))
+        self.plate = cv2.CascadeClassifier(str(cascade_root / "haarcascade_russian_plate_number.xml"))
+        if self.face.empty() or self.plate.empty():
+            raise InferenceError("MODEL_LOAD_FAILED", "OpenCV PII cascades are unavailable")
+        try:
+            self.screen_model = YOLO(screen_model_name)
+        except Exception as error:
+            raise InferenceError("MODEL_LOAD_FAILED", str(error)) from error
+
+    @staticmethod
+    def _geometry(x: float, y: float, width: float, height: float, image_width: int, image_height: int):
+        return {
+            "x": max(0.0, x / image_width),
+            "y": max(0.0, y / image_height),
+            "width": min(1.0, (x + width) / image_width) - max(0.0, x / image_width),
+            "height": min(1.0, (y + height) / image_height) - max(0.0, y / image_height),
+        }
+
+    def infer_frame(
+        self, image_path: Path, model_kind: str, confidence_threshold: float, device: str
+    ) -> List[PredictionOutput]:
+        image = self.cv2.imread(str(image_path))
+        if image is None:
+            raise InferenceError("INVALID_FRAME", "Unable to read {}".format(image_path))
+        image_height, image_width = image.shape[:2]
+        gray = self.cv2.cvtColor(image, self.cv2.COLOR_BGR2GRAY)
+        outputs: List[PredictionOutput] = []
+        for label, detector, confidence in (
+            ("face", self.face, 0.90),
+            ("license_plate", self.plate, 0.80),
+        ):
+            for x, y, width, height in detector.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20)
+            ):
+                if confidence >= confidence_threshold:
+                    outputs.append(
+                        PredictionOutput(
+                            label=label,
+                            confidence=confidence,
+                            annotation_type="bbox",
+                            geometry=self._geometry(
+                                x, y, width, height, image_width, image_height
+                            ),
+                        )
+                    )
+        try:
+            result = self.screen_model.predict(
+                source=str(image_path), conf=confidence_threshold, device=device, verbose=False
+            )[0]
+        except Exception as error:
+            raise InferenceError("INFERENCE_FAILED", str(error)) from error
+        if result.boxes is not None:
+            for coordinates, class_id, confidence in zip(
+                result.boxes.xyxy.cpu().tolist(),
+                result.boxes.cls.cpu().tolist(),
+                result.boxes.conf.cpu().tolist(),
+            ):
+                if str(result.names[int(class_id)]).lower() not in {"tv", "laptop", "cell phone"}:
+                    continue
+                x1, y1, x2, y2 = coordinates
+                outputs.append(
+                    PredictionOutput(
+                        label="screen",
+                        confidence=float(confidence),
+                        annotation_type="bbox",
+                        geometry=self._geometry(
+                            x1, y1, x2 - x1, y2 - y1, image_width, image_height
+                        ),
+                    )
+                )
+        return outputs
+
+    def infer_frames(
+        self,
+        image_paths: Sequence[Path],
+        model_kind: str,
+        confidence_threshold: float,
+        device: str,
+    ) -> List[List[PredictionOutput]]:
+        sequence = [
+            self.infer_frame(path, model_kind, confidence_threshold, device)
+            for path in image_paths
+        ]
+        return UltralyticsProvider._fill_missing_track_ids(sequence, max_gap=3)
