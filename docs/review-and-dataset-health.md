@@ -24,6 +24,9 @@ Completed inference runs are checked for:
 - rider detections with no pose on the same frame
 - poses with no rider detection on the same frame
 - deterministic 5% random audit sampling
+- snowboard detections without a person association
+- ambiguous person-to-board associations
+- a known track that disappears for one or more sampled frames and returns
 
 Each item stores the source video, frame, model run, prediction, reason, severity, score, routing
 details, status, and timestamps. A stable deduplication key makes routing idempotent.
@@ -50,6 +53,7 @@ health compares matching labels across annotators using greedy one-to-one matchi
 
 The dashboard also reports annotation coverage, reviewed frames, task status, model decisions,
 low-confidence volume, review-reason distribution, time per save, and annotations per hour.
+It also reports temporal track coverage and associated versus unassociated snowboard counts.
 
 ## API
 
@@ -77,6 +81,7 @@ to determine whether an item is a true model failure.
 
 ## Remaining Milestone 4 work
 
-Milestone 4B should add configurable 5 FPS and motion-aware sampling, temporal track IDs,
-person-to-snowboard association, box propagation, and a versioned gold-label manifest. Those
-features will turn the current frame-level quality loop into a complete temporal review workflow.
+Milestone 4B added configurable 1 FPS/5 FPS sampling, temporal track IDs, and person-to-snowboard
+association. Milestone 4C should add reviewer-controlled box propagation, motion-aware bursts,
+exact clip boundaries, and a versioned gold-label manifest. Those features will complete the
+temporal correction and scored-evaluation loop.

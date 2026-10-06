@@ -122,6 +122,24 @@ def route_model_run_reviews(
             created += _add_review(
                 session, model_run, prediction, "EDGE_CLIPPED", "HIGH", details={"margin": 0.01}
             )
+        if prediction.label == "snowboard" and prediction.associated_prediction_id is None:
+            created += _add_review(
+                session,
+                model_run,
+                prediction,
+                "UNASSOCIATED_SNOWBOARD",
+                "HIGH",
+                details={"expected_label": "rider"},
+            )
+        if prediction.association_ambiguous:
+            created += _add_review(
+                session,
+                model_run,
+                prediction,
+                "AMBIGUOUS_BOARD_ASSOCIATION",
+                "MEDIUM",
+                prediction.association_score,
+            )
         if deterministic_audit(prediction.id, audit_percentage):
             created += _add_review(
                 session,
@@ -150,6 +168,30 @@ def route_model_run_reviews(
                 "HIGH",
                 overlap,
                 {"other_prediction_id": first.id if lower_confidence.id == second.id else second.id},
+            )
+
+    predictions_by_track: Dict[str, List[ModelPrediction]] = defaultdict(list)
+    for prediction in predictions:
+        if prediction.track_id is not None:
+            predictions_by_track[prediction.track_id].append(prediction)
+    for track_id, track_predictions in predictions_by_track.items():
+        ordered = sorted(track_predictions, key=lambda item: item.frame.frame_number)
+        for previous, current in zip(ordered, ordered[1:]):
+            gap = current.frame.frame_number - previous.frame.frame_number
+            if gap <= 1:
+                continue
+            created += _add_review(
+                session,
+                model_run,
+                current,
+                "TRACK_GAP",
+                "MEDIUM",
+                details={
+                    "track_id": track_id,
+                    "previous_frame_number": previous.frame.frame_number,
+                    "current_frame_number": current.frame.frame_number,
+                    "missing_sampled_frames": gap - 1,
+                },
             )
 
     completed_runs = list(

@@ -14,6 +14,9 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
 - Annotation-task endpoints persist normalized boxes, keypoints, task state, and time-per-frame activity.
 - Completed model runs automatically route uncertain or inconsistent predictions to review.
 - Dataset-health endpoints report annotation coverage, review status, IoU/PCK agreement, and throughput.
+- Uploads support `overview` (1 FPS), `action` (5 FPS), and validated custom sampling rates.
+- Detection and pose predictions retain temporal track IDs; person detections become riders only
+  after a persisted snowboard association or association-backed track confirmation.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -45,6 +48,7 @@ the development database:
 
 ```bash
 .venv/bin/python scripts/evaluate_pipeline.py /path/to/video.mp4 \
+  --sample-fps 5 \
   --source-url "https://source.example/video" \
   --source-creator "Creator name" \
   --source-license "License or permission evidence" \
@@ -63,6 +67,7 @@ Open `http://localhost:8000/docs` to exercise the API.
 ```bash
 curl -i -X POST http://localhost:8000/api/videos \
   -H 'Idempotency-Key: demo-upload-1' \
+  -F 'sampling_profile=action' \
   -F 'video=@ride.mp4'
 ```
 
@@ -79,7 +84,7 @@ docker compose up --build
 | `MEDIA_DATABASE_URL` | local SQLite file | SQLAlchemy database URL |
 | `MEDIA_STORAGE_ROOT` | `media_service/data/media` | Local object-storage root |
 | `MEDIA_MAX_UPLOAD_BYTES` | 250 MiB | Upload limit |
-| `MEDIA_FRAME_SAMPLE_FPS` | `1` | Extracted frames per second |
+| `MEDIA_FRAME_SAMPLE_FPS` | `1` | Legacy fallback when a stored video has no sample rate |
 | `MEDIA_WORKER_POLL_SECONDS` | `1` | Worker polling interval |
 | `MEDIA_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
 | `FFMPEG_BINARY` | `ffmpeg` | FFmpeg executable |

@@ -111,6 +111,8 @@ const DatasetHealthDashboard: React.FC = () => {
             <MetricCard label="Frames" value={health.frames} detail={`${health.annotated_frames} annotated`} />
             <MetricCard label="Needs review" value={health.open_review_items} detail={`${health.resolved_review_items} resolved`} />
             <MetricCard label="Acceptance" value={`${(health.model_acceptance_rate * 100).toFixed(0)}%`} detail={`${health.total_predictions} predictions`} />
+            <MetricCard label="Temporal tracks" value={health.tracks} detail={`${health.tracked_predictions} tracked predictions`} />
+            <MetricCard label="Board links" value={health.associated_snowboards} detail={`${health.unassociated_snowboards} unassociated`} />
             <MetricCard label="BBox IoU" value={health.agreement.mean_bbox_iou == null ? '—' : health.agreement.mean_bbox_iou.toFixed(2)} detail={`${health.agreement.bbox_comparisons} comparisons`} />
             <MetricCard label="Keypoint PCK" value={health.agreement.mean_keypoint_pck == null ? '—' : health.agreement.mean_keypoint_pck.toFixed(2)} detail={`${health.agreement.keypoint_comparisons} comparisons`} />
             <MetricCard label="Throughput" value={health.annotation_throughput_per_hour == null ? '—' : Math.round(health.annotation_throughput_per_hour)} detail="annotations / hour" />
@@ -177,11 +179,13 @@ const DatasetHealthDashboard: React.FC = () => {
                       <Chip size="small" label={item.severity} color={item.severity === 'HIGH' ? 'error' : item.severity === 'MEDIUM' ? 'warning' : 'default'} />
                       <Chip size="small" variant="outlined" label={reasonLabel(item.reason)} />
                       {item.prediction_label && <Chip size="small" label={item.prediction_label} />}
+                      {item.prediction_track_id && <Chip size="small" variant="outlined" label={`track ${item.prediction_track_id}`} />}
                     </Stack>
                     <Typography fontWeight={700}>Frame {item.frame_number} · {(item.timestamp_ms / 1000).toFixed(1)}s</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {item.prediction_confidence == null ? 'Frame-level check' : `${(item.prediction_confidence * 100).toFixed(1)}% confidence`}
                       {item.score == null ? '' : ` · score ${item.score.toFixed(3)}`}
+                      {item.association_score == null ? '' : ` · association ${item.association_score.toFixed(3)}`}
                     </Typography>
                   </Box>
                   {item.status === 'OPEN' && <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>

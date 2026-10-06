@@ -7,6 +7,8 @@ import {
   CardContent,
   Chip,
   LinearProgress,
+  MenuItem,
+  Select,
   Stack,
   Typography,
 } from '@mui/material';
@@ -30,6 +32,7 @@ const MediaPipeline: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [samplingProfile, setSamplingProfile] = useState<'overview' | 'action'>('overview');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,7 +65,7 @@ const MediaPipeline: React.FC = () => {
     setVideo(null);
     setTaskId(null);
     try {
-      const result = await ingestVideo(file);
+      const result = await ingestVideo(file, samplingProfile);
       setJob(result.job);
       setVideo(result.video);
     } catch (requestError) {
@@ -102,16 +105,27 @@ const MediaPipeline: React.FC = () => {
               Upload returns immediately. A separate worker reads real metadata and extracts timestamped frames with FFmpeg.
             </Typography>
           </Box>
-          <input ref={inputRef} hidden type="file" accept="video/*,.mkv" onChange={handleFile} />
-          <Button
-            variant="contained"
-            size="large"
-            startIcon={<CloudUpload />}
-            disabled={active}
-            onClick={() => inputRef.current?.click()}
-          >
-            {uploading ? 'Uploading…' : 'Ingest video'}
-          </Button>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Select
+              size="small"
+              value={samplingProfile}
+              disabled={active}
+              onChange={(event) => setSamplingProfile(event.target.value as 'overview' | 'action')}
+            >
+              <MenuItem value="overview">Overview · 1 FPS</MenuItem>
+              <MenuItem value="action">Action · 5 FPS</MenuItem>
+            </Select>
+            <input ref={inputRef} hidden type="file" accept="video/*,.mkv" onChange={handleFile} />
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<CloudUpload />}
+              disabled={active}
+              onClick={() => inputRef.current?.click()}
+            >
+              {uploading ? 'Uploading…' : 'Ingest video'}
+            </Button>
+          </Stack>
         </Stack>
 
         {job && (
@@ -131,7 +145,7 @@ const MediaPipeline: React.FC = () => {
         {video?.status === 'READY_FOR_ANNOTATION' && (
           <Box mt={3}>
             <Alert severity="success" icon={<MovieFilter />}>
-              {video.frames.length} real frames are ready for annotation · {video.width}×{video.height} · {video.codec} · {video.duration_ms ? (video.duration_ms / 1000).toFixed(1) : '—'}s
+              {video.frames.length} real frames at {video.sample_fps} FPS ({video.sampling_profile}) are ready for annotation · {video.width}×{video.height} · {video.codec} · {video.duration_ms ? (video.duration_ms / 1000).toFixed(1) : '—'}s
             </Alert>
             <Box mt={2}>
               {taskId ? (

@@ -1,16 +1,17 @@
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional, Sequence
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .inference import InferenceError, PredictionProvider, UltralyticsProvider
+from .inference import InferenceError, PredictionOutput, PredictionProvider, UltralyticsProvider
 from .media import FFmpegProcessor, MediaProcessingError
 from .models import Frame, ModelPrediction, ModelRun, ProcessingJob, Video
 from .quality import route_model_run_reviews
 from .storage import LocalStorage
+from .tracking import associate_people_and_boards
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,8 @@ def process_job(
         session.commit()
 
         frame_dir = storage.frame_directory(video.id)
-        extracted = processor.extract_frames(source, frame_dir, settings.frame_sample_fps)
+        sample_fps = video.sample_fps or settings.frame_sample_fps
+        extracted = processor.extract_frames(source, frame_dir, sample_fps)
 
         session.execute(delete(Frame).where(Frame.video_id == video.id))
         for index, frame_path in enumerate(extracted, start=1):
@@ -102,7 +104,7 @@ def process_job(
                 Frame(
                     video_id=video.id,
                     frame_number=index,
-                    timestamp_ms=round(((index - 1) / settings.frame_sample_fps) * 1000),
+                    timestamp_ms=round(((index - 1) / sample_fps) * 1000),
                     storage_path=storage.relative_path(frame_path),
                     width=metadata.width,
                     height=metadata.height,
@@ -139,6 +141,50 @@ def record_inference_failure(session: Session, job_id: str, code: str, message: 
     session.commit()
 
 
+def _persist_frame_outputs(
+    session: Session,
+    model_run: ModelRun,
+    frame: Frame,
+    outputs: Sequence[PredictionOutput],
+) -> List[ModelPrediction]:
+    predictions = [
+        ModelPrediction(
+            model_run_id=model_run.id,
+            frame_id=frame.id,
+            label=output.label,
+            confidence=output.confidence,
+            annotation_type=output.annotation_type,
+            geometry=output.geometry,
+            track_id=(
+                str(output.external_track_id) if output.external_track_id is not None else None
+            ),
+        )
+        for output in outputs
+    ]
+    session.add_all(predictions)
+    session.flush()
+
+    if model_run.model_kind != "detection":
+        return predictions
+    person_indices = [index for index, output in enumerate(outputs) if output.label == "person"]
+    board_indices = [index for index, output in enumerate(outputs) if output.label == "snowboard"]
+    associations = associate_people_and_boards(
+        [outputs[index].geometry for index in person_indices],
+        [outputs[index].geometry for index in board_indices],
+    )
+    for association in associations:
+        person = predictions[person_indices[association.person_index]]
+        board = predictions[board_indices[association.board_index]]
+        person.label = "rider"
+        person.associated_prediction_id = board.id
+        board.associated_prediction_id = person.id
+        person.association_score = association.score
+        board.association_score = association.score
+        person.association_ambiguous = association.ambiguous
+        board.association_ambiguous = association.ambiguous
+    return predictions
+
+
 def process_inference_job(
     session: Session,
     job_id: str,
@@ -169,27 +215,54 @@ def process_inference_job(
         started_at = datetime.utcnow()
         threshold = float(model_run.parameters.get("confidence_threshold", 0.25))
         frames = list(model_run.video.frames)
-        for index, frame in enumerate(frames, start=1):
-            outputs = provider.infer_frame(
-                storage.absolute_path(frame.storage_path),
+        infer_frames = getattr(provider, "infer_frames", None)
+        if callable(infer_frames):
+            output_sequence = infer_frames(
+                [storage.absolute_path(frame.storage_path) for frame in frames],
                 model_run.model_kind,
                 threshold,
                 model_run.device,
             )
-            for output in outputs:
-                session.add(
-                    ModelPrediction(
-                        model_run_id=model_run.id,
-                        frame_id=frame.id,
-                        label=output.label,
-                        confidence=output.confidence,
-                        annotation_type=output.annotation_type,
-                        geometry=output.geometry,
-                    )
+            if len(output_sequence) != len(frames):
+                raise InferenceError(
+                    "INVALID_INFERENCE_OUTPUT",
+                    "Tracking provider returned {} frame results for {} frames".format(
+                        len(output_sequence), len(frames)
+                    ),
                 )
+            model_run.parameters = {
+                **model_run.parameters,
+                "tracking_enabled": True,
+                "tracker": "ByteTrack+geometry-fallback-v1",
+            }
+        else:
+            output_sequence = [
+                provider.infer_frame(
+                    storage.absolute_path(frame.storage_path),
+                    model_run.model_kind,
+                    threshold,
+                    model_run.device,
+                )
+                for frame in frames
+            ]
+
+        persisted_predictions: List[ModelPrediction] = []
+        for index, (frame, outputs) in enumerate(zip(frames, output_sequence), start=1):
+            persisted_predictions.extend(
+                _persist_frame_outputs(session, model_run, frame, outputs)
+            )
             model_run.processed_frames = index
             job.progress = 5 + round((index / max(1, len(frames))) * 90)
             session.commit()
+
+        rider_track_ids = {
+            prediction.track_id
+            for prediction in persisted_predictions
+            if prediction.label == "rider" and prediction.track_id is not None
+        }
+        for prediction in persisted_predictions:
+            if prediction.label == "person" and prediction.track_id in rider_track_ids:
+                prediction.label = "rider"
 
         completed_at = datetime.utcnow()
         model_run.model_version = "{}+ultralytics-{}".format(

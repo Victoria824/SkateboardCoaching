@@ -489,7 +489,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                       }}
                     />
                     <text x={box.x * 1000 + 8} y={box.y * 1000 + 28} fill="#fbbf24" fontSize="24">
-                      {prediction.label} {(prediction.confidence * 100).toFixed(0)}%
+                      {prediction.label}{prediction.track_id ? ` #${prediction.track_id}` : ''} {(prediction.confidence * 100).toFixed(0)}%
                     </text>
                   </g>;
                 })() : (prediction.geometry.points as Point[]).map((point) => (
@@ -567,6 +567,13 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Box sx={{ p: 1.5, mb: 2, bgcolor: '#fff7ed', borderRadius: 1 }}>
               <Typography fontWeight={700}>{selectedPrediction.label} · {(selectedPrediction.confidence * 100).toFixed(1)}%</Typography>
               <Typography variant="caption" color="text.secondary">{selectedPrediction.model_name} · {selectedPrediction.model_version}</Typography>
+              {(selectedPrediction.track_id || selectedPrediction.association_score != null) && (
+                <Typography display="block" variant="caption" color="text.secondary">
+                  {selectedPrediction.track_id ? `Track ${selectedPrediction.track_id}` : 'Untracked'}
+                  {selectedPrediction.association_score == null ? '' : ` · board association ${selectedPrediction.association_score.toFixed(3)}`}
+                  {selectedPrediction.association_ambiguous ? ' · ambiguous' : ''}
+                </Typography>
+              )}
               <Stack direction="row" spacing={0.5} mt={1}>
                 <Button size="small" color="success" startIcon={<Check />} onClick={acceptPrediction}>Accept</Button>
                 <Button size="small" startIcon={<Edit />} onClick={correctPrediction}>Correct</Button>

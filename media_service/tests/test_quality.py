@@ -260,3 +260,86 @@ def test_cross_model_review_routing_is_idempotent():
     assert first_count == 2
     assert second_count == 0
     assert reasons == {"MISSING_POSE", "POSE_WITHOUT_RIDER"}
+
+
+def test_temporal_and_association_review_routing():
+    Session = make_database()
+    with Session() as session:
+        video = Video(
+            filename="action.mp4",
+            storage_path="videos/temporal-action.mp4",
+            file_size=10,
+            status="READY_FOR_ANNOTATION",
+        )
+        frames = [
+            Frame(
+                video=video,
+                frame_number=index,
+                timestamp_ms=(index - 1) * 200,
+                storage_path=f"frames/temporal-action/{index}.jpg",
+            )
+            for index in (1, 2, 3)
+        ]
+        model_run = ModelRun(
+            video=video,
+            model_kind="detection",
+            provider="fake",
+            model_name="detector",
+            model_version="v1",
+            device="cpu",
+            parameters={},
+            status="COMPLETED",
+        )
+        predictions = [
+            ModelPrediction(
+                model_run=model_run,
+                frame=frames[0],
+                label="rider",
+                confidence=0.9,
+                annotation_type="bbox",
+                geometry={"x": 0.2, "y": 0.2, "width": 0.3, "height": 0.5},
+                track_id="7",
+            ),
+            ModelPrediction(
+                model_run=model_run,
+                frame=frames[2],
+                label="rider",
+                confidence=0.9,
+                annotation_type="bbox",
+                geometry={"x": 0.25, "y": 0.2, "width": 0.3, "height": 0.5},
+                track_id="7",
+            ),
+            ModelPrediction(
+                model_run=model_run,
+                frame=frames[1],
+                label="snowboard",
+                confidence=0.9,
+                annotation_type="bbox",
+                geometry={"x": 0.2, "y": 0.72, "width": 0.35, "height": 0.08},
+                track_id="12",
+            ),
+            ModelPrediction(
+                model_run=model_run,
+                frame=frames[1],
+                label="snowboard",
+                confidence=0.9,
+                annotation_type="bbox",
+                geometry={"x": 0.6, "y": 0.72, "width": 0.25, "height": 0.08},
+                track_id="13",
+                associated_prediction_id=None,
+                association_score=0.45,
+                association_ambiguous=True,
+            ),
+        ]
+        session.add_all([video, *frames, model_run, *predictions])
+        session.flush()
+
+        created = route_model_run_reviews(
+            session, model_run, low_confidence_threshold=0, audit_percentage=0
+        )
+        reasons = [item.reason for item in video.review_items]
+
+    assert created == 4
+    assert reasons.count("UNASSOCIATED_SNOWBOARD") == 2
+    assert reasons.count("AMBIGUOUS_BOARD_ASSOCIATION") == 1
+    assert reasons.count("TRACK_GAP") == 1

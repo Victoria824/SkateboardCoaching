@@ -28,6 +28,8 @@ class VideoResponse(BaseModel):
     height: Optional[int]
     codec: Optional[str]
     source_frame_count: Optional[int]
+    sampling_profile: str
+    sample_fps: float
     status: str
     created_at: datetime
     frames: List[FrameResponse] = Field(default_factory=list)
@@ -170,6 +172,10 @@ class ModelPredictionResponse(BaseModel):
     confidence: float
     annotation_type: str
     geometry: Dict[str, Any]
+    track_id: Optional[str]
+    associated_prediction_id: Optional[str]
+    association_score: Optional[float]
+    association_ambiguous: bool
     status: str
     model_name: str
     model_version: str
@@ -217,6 +223,8 @@ class ReviewItemResponse(BaseModel):
     image_url: str
     prediction_label: Optional[str]
     prediction_confidence: Optional[float]
+    prediction_track_id: Optional[str]
+    association_score: Optional[float]
     annotation_task_id: Optional[str]
     created_at: datetime
     resolved_at: Optional[datetime]
@@ -253,6 +261,10 @@ class DatasetHealthResponse(BaseModel):
     model_correction_rate: float
     model_rejection_rate: float
     low_confidence_predictions: int
+    tracked_predictions: int
+    tracks: int
+    associated_snowboards: int
+    unassociated_snowboards: int
     open_review_items: int
     resolved_review_items: int
     average_annotation_time_ms: Optional[float]

@@ -61,6 +61,8 @@ def _review_response(session: Session, item: ReviewItem) -> ReviewItemResponse:
         image_url="{}/{}".format(settings.public_media_url, item.frame.storage_path),
         prediction_label=item.prediction.label if item.prediction else None,
         prediction_confidence=item.prediction.confidence if item.prediction else None,
+        prediction_track_id=item.prediction.track_id if item.prediction else None,
+        association_score=item.prediction.association_score if item.prediction else None,
         annotation_task_id=task.id if task else None,
         created_at=item.created_at,
         resolved_at=item.resolved_at,
@@ -195,6 +197,22 @@ def dataset_health(video_id: Optional[str] = None, session: Session = Depends(ge
         model_correction_rate=prediction_counts["CORRECTED"] / decided if decided else 0,
         model_rejection_rate=prediction_counts["REJECTED"] / decided if decided else 0,
         low_confidence_predictions=sum(prediction.confidence < 0.5 for prediction in predictions),
+        tracked_predictions=sum(prediction.track_id is not None for prediction in predictions),
+        tracks=len(
+            {
+                (prediction.model_run_id, prediction.track_id)
+                for prediction in predictions
+                if prediction.track_id is not None
+            }
+        ),
+        associated_snowboards=sum(
+            prediction.label == "snowboard" and prediction.associated_prediction_id is not None
+            for prediction in predictions
+        ),
+        unassociated_snowboards=sum(
+            prediction.label == "snowboard" and prediction.associated_prediction_id is None
+            for prediction in predictions
+        ),
         open_review_items=sum(item.status == "OPEN" for item in reviews),
         resolved_review_items=sum(item.status == "RESOLVED" for item in reviews),
         average_annotation_time_ms=sum(durations) / len(durations) if durations else None,

@@ -38,6 +38,40 @@ class FakeProvider:
         ]
 
 
+class FakeTrackedProvider:
+    runtime_version = "tracked-runtime"
+
+    def infer_frames(self, image_paths, model_kind, confidence_threshold, device):
+        assert len(image_paths) == 2
+        return [
+            [
+                PredictionOutput(
+                    label="person",
+                    confidence=0.95,
+                    annotation_type="bbox",
+                    geometry={"x": 0.2, "y": 0.1, "width": 0.3, "height": 0.6},
+                    external_track_id=7,
+                ),
+                PredictionOutput(
+                    label="snowboard",
+                    confidence=0.88,
+                    annotation_type="bbox",
+                    geometry={"x": 0.18, "y": 0.68, "width": 0.38, "height": 0.08},
+                    external_track_id=12,
+                ),
+            ],
+            [
+                PredictionOutput(
+                    label="person",
+                    confidence=0.93,
+                    annotation_type="bbox",
+                    geometry={"x": 0.22, "y": 0.1, "width": 0.3, "height": 0.6},
+                    external_track_id=7,
+                )
+            ],
+        ]
+
+
 def make_database():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -95,6 +129,72 @@ def test_inference_worker_persists_versioned_predictions(tmp_path):
         assert model_run.processed_frames == 1
         assert len(model_run.predictions) == 1
         assert model_run.predictions[0].confidence == 0.91
+
+
+def test_inference_worker_tracks_and_associates_rider_sequence(tmp_path):
+    Session = make_database()
+    storage = LocalStorage(tmp_path)
+    with Session() as session:
+        video = Video(
+            filename="action.mp4",
+            storage_path="videos/action.mp4",
+            file_size=10,
+            sampling_profile="action",
+            sample_fps=5,
+            status="READY_FOR_ANNOTATION",
+        )
+        frames = [
+            Frame(
+                video=video,
+                frame_number=index,
+                timestamp_ms=(index - 1) * 200,
+                storage_path=f"frames/action/{index}.jpg",
+            )
+            for index in (1, 2)
+        ]
+        model_run = ModelRun(
+            video=video,
+            model_kind="detection",
+            provider="fake",
+            model_name="tracked-detector",
+            model_version="v1",
+            device="cpu",
+            parameters={"confidence_threshold": 0.25},
+            status="QUEUED",
+        )
+        job = ProcessingJob(
+            video=video,
+            model_run=model_run,
+            job_type="MODEL_INFERENCE",
+            state="QUEUED",
+        )
+        session.add_all([video, *frames, model_run, job])
+        session.commit()
+        for frame in frames:
+            path = storage.absolute_path(frame.storage_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"image")
+
+        process_inference_job(
+            session,
+            claim_next_job(session),
+            provider=FakeTrackedProvider(),
+            storage=storage,
+        )
+
+        session.refresh(model_run)
+        people = sorted(
+            (prediction for prediction in model_run.predictions if prediction.track_id == "7"),
+            key=lambda prediction: prediction.frame.frame_number,
+        )
+        board = next(
+            prediction for prediction in model_run.predictions if prediction.label == "snowboard"
+        )
+        assert [prediction.label for prediction in people] == ["rider", "rider"]
+        assert board.associated_prediction_id == people[0].id
+        assert people[0].associated_prediction_id == board.id
+        assert board.association_score is not None and board.association_score >= 0.3
+        assert model_run.parameters["tracker"] == "ByteTrack+geometry-fallback-v1"
 
 
 def test_prediction_accept_correct_reject_and_metrics():

@@ -31,6 +31,7 @@ def test_upload_returns_accepted_job_and_supports_idempotency(tmp_path):
             first = client.post(
                 "/api/videos",
                 headers={"Idempotency-Key": "upload-one"},
+                data={"sampling_profile": "action"},
                 files={"video": ("ride.mp4", b"test-video", "video/mp4")},
             )
             second = client.post(
@@ -47,6 +48,8 @@ def test_upload_returns_accepted_job_and_supports_idempotency(tmp_path):
     payload = first.json()
     assert payload["video"]["status"] == "QUEUED"
     assert payload["video"]["file_size"] == len(b"test-video")
+    assert payload["video"]["sampling_profile"] == "action"
+    assert payload["video"]["sample_fps"] == 5
     assert payload["job"]["state"] == "QUEUED"
     assert second.status_code == 202
     assert second.json()["job"]["id"] == payload["job"]["id"]
@@ -81,6 +84,34 @@ def test_upload_rejects_non_video_extension(tmp_path):
         main.app.dependency_overrides.clear()
 
     assert response.status_code == 415
+
+
+def test_upload_rejects_invalid_sampling_profile(tmp_path):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    def test_session():
+        with Session() as session:
+            yield session
+
+    main.app.dependency_overrides[get_session] = test_session
+    try:
+        with TestClient(main.app) as client:
+            response = client.post(
+                "/api/videos",
+                data={"sampling_profile": "custom", "sample_fps": "100"},
+                files={"video": ("ride.mp4", b"test-video", "video/mp4")},
+            )
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert "sample_fps" in response.json()["detail"]
 
 
 def test_cors_allows_browser_annotation_updates():

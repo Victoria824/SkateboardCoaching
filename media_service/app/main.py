@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, select
@@ -59,6 +59,7 @@ app.include_router(quality_router)
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
+SAMPLING_PROFILES = {"overview": 1.0, "action": 5.0}
 
 
 def frame_response(frame: Frame) -> FrameResponse:
@@ -85,6 +86,8 @@ def video_response(video: Video, include_frames: bool = True) -> VideoResponse:
         height=video.height,
         codec=video.codec,
         source_frame_count=video.source_frame_count,
+        sampling_profile=video.sampling_profile,
+        sample_fps=video.sample_fps,
         status=video.status,
         created_at=video.created_at,
         frames=[frame_response(frame) for frame in video.frames] if include_frames else [],
@@ -100,9 +103,21 @@ def health() -> dict:
 def upload_video(
     response: Response,
     video_file: UploadFile = File(..., alias="video"),
+    sampling_profile: str = Form("overview"),
+    sample_fps: Optional[float] = Form(None),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     session: Session = Depends(get_session),
 ) -> UploadResponse:
+    normalized_profile = sampling_profile.strip().lower()
+    if normalized_profile in SAMPLING_PROFILES:
+        resolved_sample_fps = SAMPLING_PROFILES[normalized_profile]
+    elif normalized_profile == "custom" and sample_fps is not None and 0.1 <= sample_fps <= 30:
+        resolved_sample_fps = sample_fps
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="Sampling profile must be overview, action, or custom with sample_fps from 0.1 to 30",
+        )
     if idempotency_key:
         existing = session.scalar(
             select(ProcessingJob).where(ProcessingJob.idempotency_key == idempotency_key)
@@ -117,7 +132,14 @@ def upload_video(
     if video_file.content_type and not video_file.content_type.startswith("video/"):
         raise HTTPException(status_code=415, detail="Uploaded file must be a video")
 
-    video = Video(filename=filename, storage_path="pending", mime_type=video_file.content_type, file_size=0)
+    video = Video(
+        filename=filename,
+        storage_path="pending",
+        mime_type=video_file.content_type,
+        file_size=0,
+        sampling_profile=normalized_profile,
+        sample_fps=resolved_sample_fps,
+    )
     session.add(video)
     session.flush()
     destination = storage.video_path(video.id, filename)

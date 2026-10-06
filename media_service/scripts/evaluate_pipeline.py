@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         help="Model to run; repeat for both. Defaults to detection and pose.",
     )
     parser.add_argument("--confidence", type=float, default=0.25)
+    parser.add_argument(
+        "--sample-fps",
+        type=float,
+        default=1.0,
+        help="Frame sampling rate. Use 1 for overview or 5 for action labeling.",
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--source-url")
     parser.add_argument("--source-creator")
@@ -85,10 +91,25 @@ def prediction_summary(
     confidences = [prediction.confidence for prediction in predictions]
     by_label = Counter(prediction.label for prediction in predictions)
     by_frame = Counter(prediction.frame.frame_number for prediction in predictions)
+    track_ids = {prediction.track_id for prediction in predictions if prediction.track_id is not None}
+    track_lengths = Counter(
+        prediction.track_id for prediction in predictions if prediction.track_id is not None
+    )
     summary = {
         "prediction_count": len(predictions),
         "frames_with_predictions": len(by_frame),
         "predictions_by_label": dict(sorted(by_label.items())),
+        "tracked_predictions": sum(prediction.track_id is not None for prediction in predictions),
+        "track_count": len(track_ids),
+        "multi_frame_tracks": sum(length > 1 for length in track_lengths.values()),
+        "associated_snowboards": sum(
+            prediction.label == "snowboard" and prediction.associated_prediction_id is not None
+            for prediction in predictions
+        ),
+        "unassociated_snowboards": sum(
+            prediction.label == "snowboard" and prediction.associated_prediction_id is None
+            for prediction in predictions
+        ),
         "confidence": {
             "min": round(min(confidences), 4) if confidences else None,
             "median": percentile(confidences, 0.5) if confidences else None,
@@ -104,6 +125,10 @@ def prediction_summary(
                 "confidence": round(prediction.confidence, 4),
                 "annotation_type": prediction.annotation_type,
                 "geometry": prediction.geometry,
+                "track_id": prediction.track_id,
+                "associated_prediction_id": prediction.associated_prediction_id,
+                "association_score": prediction.association_score,
+                "association_ambiguous": prediction.association_ambiguous,
             }
             for prediction in predictions
         ]
@@ -116,6 +141,8 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
         raise SystemExit("Video does not exist: {}".format(source))
     if not 0 < args.confidence <= 1:
         raise SystemExit("--confidence must be between 0 and 1")
+    if not 0.1 <= args.sample_fps <= 30:
+        raise SystemExit("--sample-fps must be between 0.1 and 30")
 
     model_kinds = args.model_kinds or ["detection", "pose"]
     with tempfile.TemporaryDirectory(prefix="snowboard-evaluation-") as temp_directory:
@@ -131,6 +158,12 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
                 storage_path="pending",
                 mime_type="video/{}".format(source.suffix.lstrip(".") or "unknown"),
                 file_size=source.stat().st_size,
+                sampling_profile=(
+                    "action"
+                    if args.sample_fps == 5
+                    else "overview" if args.sample_fps == 1 else "custom"
+                ),
+                sample_fps=args.sample_fps,
                 status="QUEUED",
             )
             session.add(video)
@@ -177,6 +210,8 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
                     "codec": video.codec,
                     "source_frame_count": video.source_frame_count,
                     "sampled_frame_count": len(video.frames),
+                    "sampling_profile": video.sampling_profile,
+                    "sample_fps": video.sample_fps,
                     "sample_interval_ms": (
                         video.frames[1].timestamp_ms - video.frames[0].timestamp_ms
                         if len(video.frames) > 1

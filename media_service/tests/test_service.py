@@ -11,6 +11,9 @@ from app.storage import LocalStorage
 
 
 class FakeProcessor:
+    def __init__(self):
+        self.sample_fps = None
+
     def probe(self, _: Path) -> VideoMetadata:
         return VideoMetadata(
             duration_ms=2000,
@@ -23,6 +26,7 @@ class FakeProcessor:
 
     def extract_frames(self, _: Path, output_dir: Path, sample_fps: float):
         assert sample_fps > 0
+        self.sample_fps = sample_fps
         output_dir.mkdir(parents=True, exist_ok=True)
         frames = [output_dir / "frame-000001.jpg", output_dir / "frame-000002.jpg"]
         for frame in frames:
@@ -42,7 +46,14 @@ def test_worker_processes_a_queued_video(tmp_path):
     storage = LocalStorage(tmp_path)
 
     with Session() as session:
-        video = Video(filename="ride.mp4", storage_path="videos/video/ride.mp4", file_size=5, status="QUEUED")
+        video = Video(
+            filename="ride.mp4",
+            storage_path="videos/video/ride.mp4",
+            file_size=5,
+            sampling_profile="action",
+            sample_fps=5,
+            status="QUEUED",
+        )
         session.add(video)
         session.flush()
         source = storage.absolute_path(video.storage_path)
@@ -55,7 +66,8 @@ def test_worker_processes_a_queued_video(tmp_path):
         claimed_id = claim_next_job(session)
         assert claimed_id == job.id
 
-        process_job(session, job.id, processor=FakeProcessor(), storage=storage)
+        processor = FakeProcessor()
+        process_job(session, job.id, processor=processor, storage=storage)
 
         session.refresh(video)
         session.refresh(job)
@@ -63,7 +75,8 @@ def test_worker_processes_a_queued_video(tmp_path):
         assert job.state == "READY_FOR_ANNOTATION"
         assert job.progress == 100
         assert len(video.frames) == 2
-        assert video.frames[1].timestamp_ms == 1000
+        assert processor.sample_fps == 5
+        assert video.frames[1].timestamp_ms == 200
 
 
 def test_worker_records_unexpected_failures_for_retry(tmp_path):

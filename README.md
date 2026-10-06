@@ -17,6 +17,10 @@ Milestone 4A adds automatic quality routing, random audits, review events, multi
 agreement, and a dataset-health dashboard. See
 [the review and dataset-health workflow](docs/review-and-dataset-health.md).
 
+Milestone 4B adds selectable 1 FPS/5 FPS sampling, ByteTrack-backed temporal identities with a
+short-term geometry fallback, explicit person-to-snowboard association, temporal review rules,
+and track/association health metrics. See [the temporal tracking workflow](docs/temporal-tracking.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

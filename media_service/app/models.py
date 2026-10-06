@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -30,6 +30,8 @@ class Video(Base):
     height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     codec: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_frame_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sampling_profile: Mapped[str] = mapped_column(String(50), default="overview", index=True)
+    sample_fps: Mapped[float] = mapped_column(Float, default=1.0)
     status: Mapped[str] = mapped_column(String(50), default="UPLOADING", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -197,6 +199,12 @@ class ModelPrediction(Base):
     confidence: Mapped[float] = mapped_column(Float)
     annotation_type: Mapped[str] = mapped_column(String(50))
     geometry: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    track_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    associated_prediction_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("model_predictions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    association_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    association_ambiguous: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(50), default="PENDING", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

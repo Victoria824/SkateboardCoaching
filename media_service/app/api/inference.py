@@ -39,6 +39,10 @@ def prediction_response(prediction: ModelPrediction) -> ModelPredictionResponse:
         confidence=prediction.confidence,
         annotation_type=prediction.annotation_type,
         geometry=prediction.geometry,
+        track_id=prediction.track_id,
+        associated_prediction_id=prediction.associated_prediction_id,
+        association_score=prediction.association_score,
+        association_ambiguous=prediction.association_ambiguous,
         status=prediction.status,
         model_name=prediction.model_run.model_name,
         model_version=prediction.model_run.model_version,
@@ -187,4 +191,3 @@ def get_model_metrics(model_run_id: str, session: Session = Depends(get_session)
         average_decision_time_ms=float(average_duration) if average_duration is not None else None,
         by_label=by_label,
     )
-

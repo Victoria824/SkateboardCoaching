@@ -28,6 +28,8 @@ export interface ProcessedVideo {
   width?: number | null;
   height?: number | null;
   codec?: string | null;
+  sampling_profile: 'overview' | 'action' | 'custom';
+  sample_fps: number;
   status: string;
   frames: ProcessedFrame[];
 }
@@ -90,6 +92,10 @@ export interface ModelPrediction {
   confidence: number;
   annotation_type: 'bbox' | 'keypoints';
   geometry: Record<string, any>;
+  track_id?: string | null;
+  associated_prediction_id?: string | null;
+  association_score?: number | null;
+  association_ambiguous?: boolean;
   status: 'PENDING' | 'ACCEPTED' | 'CORRECTED' | 'REJECTED';
   model_name: string;
   model_version: string;
@@ -134,6 +140,10 @@ export interface DatasetHealth {
   model_correction_rate: number;
   model_rejection_rate: number;
   low_confidence_predictions: number;
+  tracked_predictions: number;
+  tracks: number;
+  associated_snowboards: number;
+  unassociated_snowboards: number;
   open_review_items: number;
   resolved_review_items: number;
   average_annotation_time_ms?: number | null;
@@ -159,6 +169,8 @@ export interface ReviewItem {
   image_url: string;
   prediction_label?: string | null;
   prediction_confidence?: number | null;
+  prediction_track_id?: string | null;
+  association_score?: number | null;
   annotation_task_id?: string | null;
 }
 
@@ -170,12 +182,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function ingestVideo(file: File): Promise<UploadResult> {
+export async function ingestVideo(
+  file: File,
+  samplingProfile: 'overview' | 'action' = 'overview'
+): Promise<UploadResult> {
   const formData = new FormData();
   formData.append('video', file);
+  formData.append('sampling_profile', samplingProfile);
   const response = await fetch(`${MEDIA_API_BASE_URL}/api/videos`, {
     method: 'POST',
-    headers: { 'Idempotency-Key': `${file.name}-${file.size}-${file.lastModified}` },
+    headers: { 'Idempotency-Key': `${file.name}-${file.size}-${file.lastModified}-${samplingProfile}` },
     body: formData,
   });
   return parseResponse<UploadResult>(response);

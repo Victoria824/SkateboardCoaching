@@ -2,10 +2,11 @@
 
 ## Status
 
-Milestone 4A is implemented: IoU/PCK agreement primitives, duplicate annotation tasks, automatic
-quality routing, random audit sampling, persisted review events, real-video routing evidence, and
-the `/quality` dashboard. Milestone 4B remains focused on sampling profiles, tracking,
-person-to-board association, propagation, and a versioned gold-label manifest.
+Milestones 4A and 4B are implemented through temporal inference: IoU/PCK agreement primitives,
+automatic review routing, the `/quality` dashboard, 1 FPS/5 FPS sampling profiles, persisted track
+IDs, ByteTrack plus deterministic geometry fallback, and explicit person-to-board association.
+Milestone 4C remains focused on correction propagation, motion-aware bursts, exact clip boundaries,
+and a versioned gold-label manifest with scored precision/recall.
 
 ## Objective
 

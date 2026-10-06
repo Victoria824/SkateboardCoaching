@@ -76,6 +76,27 @@ The resort clip generated 39 review items: 20 low-confidence predictions, 9 edge
 9 low-confidence predictions, 3 missing-pose cases, 1 edge-clipped box, and 1 pose without a rider
 detection. These are review candidates rather than confirmed errors.
 
+## Milestone 4B temporal rerun
+
+The same licensed clips were rerun after adding sampling profiles, ByteTrack-backed IDs, a
+deterministic short-term geometry fallback for unconfirmed tracks, and person-to-board association.
+The jump clip used the 5 FPS `action` profile; the resort clip used the 1 FPS `overview` profile.
+
+| Clip | Samples | Detection tracks | Multi-frame detection tracks | Board links | Unlinked boards |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Jump, action profile | 164 | 19 | 5 | 10 | 1 |
+| Resort POV, overview profile | 10 | 14 | 10 | 2 | 2 |
+
+The jump detector emitted 35 predictions on 22 frames, compared with 12 predictions on 6 frames
+in the original 1 FPS run. All 35 predictions received an auditable track ID; 13 person detections
+were classified as `rider` through a board association or the same associated person track, while
+11 remained `person`. Detection took 9.9 seconds (60.5 ms per sampled frame) in this run.
+
+The crowded resort run no longer maps all people to riders: 26 predictions remained `person`, 3
+were association-backed `rider` predictions, and 4 were snowboards. These counts demonstrate the
+semantic behavior of the association stage, not association accuracy; gold labels are still
+required before publishing precision or recall.
+
 ## Reproduce
 
 Install the media and ML dependencies, obtain a locally licensed test video, then run:
@@ -83,6 +104,7 @@ Install the media and ML dependencies, obtain a locally licensed test video, the
 ```bash
 cd media_service
 .venv/bin/python scripts/evaluate_pipeline.py /path/to/video.mp4 \
+  --sample-fps 5 \
   --source-url "https://source.example/video" \
   --source-creator "Creator name" \
   --source-license "License or permission evidence" \
