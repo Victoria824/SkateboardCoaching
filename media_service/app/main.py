@@ -1,5 +1,4 @@
 import logging
-from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
@@ -11,8 +10,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .api.inference import router as inference_router
+from .api.quality import router as quality_router
 from .config import settings
-from .database import create_schema, get_session
+from .database import get_session
 from .models import (
     Annotation,
     AnnotationActivity,
@@ -35,23 +36,15 @@ from .schemas import (
     VideoResponse,
 )
 from .storage import LocalStorage, UploadTooLarge, safe_filename
-from .api.inference import router as inference_router
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 storage = LocalStorage()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    create_schema()
-    yield
-
-
 app = FastAPI(
     title="Snowboard Vision Media Service",
     version="0.1.0",
-    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -62,6 +55,7 @@ app.add_middleware(
 )
 app.mount(settings.public_media_url, StaticFiles(directory=str(settings.media_root)), name="media")
 app.include_router(inference_router)
+app.include_router(quality_router)
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
@@ -201,21 +195,27 @@ def list_frames(video_id: str, session: Session = Depends(get_session)) -> List[
 
 
 @app.post("/api/videos/{video_id}/annotation-tasks", response_model=AnnotationTaskResponse, status_code=201)
-def create_annotation_task(video_id: str, session: Session = Depends(get_session)) -> AnnotationTaskResponse:
+def create_annotation_task(
+    video_id: str,
+    assigned_to: Optional[str] = None,
+    force_new: bool = False,
+    session: Session = Depends(get_session),
+) -> AnnotationTaskResponse:
     video = session.get(Video, video_id)
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found")
     if video.status != "READY_FOR_ANNOTATION":
         raise HTTPException(status_code=409, detail="Video is not ready for annotation")
-    existing = session.scalar(
-        select(AnnotationTask)
-        .where(AnnotationTask.video_id == video_id, AnnotationTask.status != "COMPLETED")
-        .order_by(AnnotationTask.created_at)
-        .limit(1)
-    )
-    if existing:
-        return AnnotationTaskResponse.model_validate(existing)
-    task = AnnotationTask(video=video, status="PENDING")
+    if not force_new:
+        existing = session.scalar(
+            select(AnnotationTask)
+            .where(AnnotationTask.video_id == video_id, AnnotationTask.status != "COMPLETED")
+            .order_by(AnnotationTask.created_at)
+            .limit(1)
+        )
+        if existing:
+            return AnnotationTaskResponse.model_validate(existing)
+    task = AnnotationTask(video=video, status="PENDING", assigned_to=assigned_to)
     session.add(task)
     session.commit()
     session.refresh(task)

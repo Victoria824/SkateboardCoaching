@@ -109,6 +109,59 @@ export interface ModelMetrics {
   by_label: Record<string, Record<string, number>>;
 }
 
+export interface AgreementMetrics {
+  video_id?: string | null;
+  bbox_comparisons: number;
+  mean_bbox_iou?: number | null;
+  keypoint_comparisons: number;
+  mean_keypoint_pck?: number | null;
+}
+
+export interface DatasetHealth {
+  video_id?: string | null;
+  videos: number;
+  frames: number;
+  annotated_frames: number;
+  reviewed_frames: number;
+  pending_tasks: number;
+  completed_tasks: number;
+  total_predictions: number;
+  accepted_predictions: number;
+  corrected_predictions: number;
+  rejected_predictions: number;
+  pending_predictions: number;
+  model_acceptance_rate: number;
+  model_correction_rate: number;
+  model_rejection_rate: number;
+  low_confidence_predictions: number;
+  open_review_items: number;
+  resolved_review_items: number;
+  average_annotation_time_ms?: number | null;
+  annotation_throughput_per_hour?: number | null;
+  label_distribution: Record<string, number>;
+  review_reason_distribution: Record<string, number>;
+  agreement: AgreementMetrics;
+}
+
+export interface ReviewItem {
+  id: string;
+  video_id: string;
+  frame_id: string;
+  model_run_id: string;
+  prediction_id?: string | null;
+  reason: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  status: 'OPEN' | 'RESOLVED' | 'ESCALATED' | 'NEEDS_CORRECTION';
+  score?: number | null;
+  details: Record<string, unknown>;
+  frame_number: number;
+  timestamp_ms: number;
+  image_url: string;
+  prediction_label?: string | null;
+  prediction_confidence?: number | null;
+  annotation_task_id?: string | null;
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -230,6 +283,35 @@ export async function rejectModelPrediction(
 export async function getModelMetrics(modelRunId: string): Promise<ModelMetrics> {
   return parseResponse<ModelMetrics>(
     await fetch(`${MEDIA_API_BASE_URL}/api/model-runs/${modelRunId}/metrics`)
+  );
+}
+
+export async function getDatasetHealth(videoId?: string): Promise<DatasetHealth> {
+  const query = videoId ? `?video_id=${encodeURIComponent(videoId)}` : '';
+  return parseResponse<DatasetHealth>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/dataset-health${query}`)
+  );
+}
+
+export async function getReviewItems(status = 'OPEN', videoId?: string): Promise<ReviewItem[]> {
+  const parameters = new URLSearchParams({ status });
+  if (videoId) parameters.set('video_id', videoId);
+  return parseResponse<ReviewItem[]>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/review-items?${parameters.toString()}`)
+  );
+}
+
+export async function resolveReviewItem(
+  reviewItemId: string,
+  action: 'APPROVED' | 'DISMISSED' | 'ESCALATED' | 'NEEDS_CORRECTION',
+  reviewer = 'portfolio-reviewer'
+): Promise<ReviewItem> {
+  return parseResponse<ReviewItem>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/review-items/${reviewItemId}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, reviewer }),
+    })
   );
 }
 

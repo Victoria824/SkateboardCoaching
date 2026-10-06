@@ -13,16 +13,9 @@ engine = create_engine(settings.database_url, connect_args=connect_args, pool_pr
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-def create_schema() -> None:
-    from . import models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
-
-
 def get_session():
     session = SessionLocal()
     try:
         yield session
     finally:
         session.close()
-

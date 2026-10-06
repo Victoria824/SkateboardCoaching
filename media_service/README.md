@@ -12,6 +12,8 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
 - `Idempotency-Key` prevents a client retry from creating duplicate work.
 - Failed work records a stable error code and can be retried.
 - Annotation-task endpoints persist normalized boxes, keypoints, task state, and time-per-frame activity.
+- Completed model runs automatically route uncertain or inconsistent predictions to review.
+- Dataset-health endpoints report annotation coverage, review status, IoU/PCK agreement, and throughput.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -21,6 +23,7 @@ SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a Post
 cd media_service
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/alembic upgrade head
 
 # Terminal 1
 .venv/bin/uvicorn app.main:app --reload --port 8000
@@ -52,13 +55,8 @@ The source video, extracted frames, and JSON output belong under the ignored `da
 See [the real-video findings](../docs/real-video-evaluation.md) for the recorded methodology and
 results.
 
-Database schema changes are managed by Alembic:
-
-```bash
-.venv/bin/alembic upgrade head
-```
-
-Docker Compose runs this migration automatically before starting the API and worker.
+Database schema changes are managed exclusively by Alembic. API and worker startup never mutate
+the schema. Docker Compose runs the migration automatically before starting either process.
 
 Open `http://localhost:8000/docs` to exercise the API.
 

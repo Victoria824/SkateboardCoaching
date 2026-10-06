@@ -3,7 +3,7 @@ import signal
 import time
 
 from .config import settings
-from .database import SessionLocal, create_schema
+from .database import SessionLocal
 from .service import claim_next_job, process_inference_job, process_job
 
 
@@ -18,7 +18,6 @@ def stop_worker(*_) -> None:
 
 
 def run() -> None:
-    create_schema()
     signal.signal(signal.SIGTERM, stop_worker)
     signal.signal(signal.SIGINT, stop_worker)
     logger.info("Media worker started")

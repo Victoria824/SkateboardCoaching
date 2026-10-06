@@ -68,6 +68,14 @@ precision or recall.
 These findings make temporal labeling and measurable review quality a higher-value next step than
 adding another standalone model.
 
+## Quality-routing rerun
+
+After the Milestone 4A review workflow was added, the clips were rerun through automatic routing.
+The resort clip generated 39 review items: 20 low-confidence predictions, 9 edge-clipped boxes,
+6 rider detections without pose, and 4 deterministic random audits. The jump clip generated 14:
+9 low-confidence predictions, 3 missing-pose cases, 1 edge-clipped box, and 1 pose without a rider
+detection. These are review candidates rather than confirmed errors.
+
 ## Reproduce
 
 Install the media and ML dependencies, obtain a locally licensed test video, then run:

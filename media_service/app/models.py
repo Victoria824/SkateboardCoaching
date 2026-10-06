@@ -46,6 +46,9 @@ class Video(Base):
     model_runs: Mapped[List["ModelRun"]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+    review_items: Mapped[List["ReviewItem"]] = relationship(
+        back_populates="video", cascade="all, delete-orphan"
+    )
 
 
 class Frame(Base):
@@ -66,6 +69,9 @@ class Frame(Base):
         back_populates="frame", cascade="all, delete-orphan"
     )
     model_predictions: Mapped[List["ModelPrediction"]] = relationship(
+        back_populates="frame", cascade="all, delete-orphan"
+    )
+    review_items: Mapped[List["ReviewItem"]] = relationship(
         back_populates="frame", cascade="all, delete-orphan"
     )
 
@@ -176,6 +182,9 @@ class ModelRun(Base):
     predictions: Mapped[List["ModelPrediction"]] = relationship(
         back_populates="model_run", cascade="all, delete-orphan"
     )
+    review_items: Mapped[List["ReviewItem"]] = relationship(
+        back_populates="model_run", cascade="all, delete-orphan"
+    )
 
 
 class ModelPrediction(Base):
@@ -195,6 +204,9 @@ class ModelPrediction(Base):
     model_run: Mapped[ModelRun] = relationship(back_populates="predictions")
     frame: Mapped[Frame] = relationship(back_populates="model_predictions")
     decisions: Mapped[List["PredictionDecision"]] = relationship(
+        back_populates="prediction", cascade="all, delete-orphan"
+    )
+    review_items: Mapped[List["ReviewItem"]] = relationship(
         back_populates="prediction", cascade="all, delete-orphan"
     )
 
@@ -217,3 +229,48 @@ class PredictionDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     prediction: Mapped[ModelPrediction] = relationship(back_populates="decisions")
+
+
+class ReviewItem(Base):
+    __tablename__ = "review_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    dedupe_key: Mapped[str] = mapped_column(String(255), unique=True)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[str] = mapped_column(ForeignKey("frames.id", ondelete="CASCADE"), index=True)
+    model_run_id: Mapped[str] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="CASCADE"), index=True
+    )
+    prediction_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("model_predictions.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    reason: Mapped[str] = mapped_column(String(100), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    video: Mapped[Video] = relationship(back_populates="review_items")
+    frame: Mapped[Frame] = relationship(back_populates="review_items")
+    model_run: Mapped[ModelRun] = relationship(back_populates="review_items")
+    prediction: Mapped[Optional[ModelPrediction]] = relationship(back_populates="review_items")
+    events: Mapped[List["ReviewEvent"]] = relationship(
+        back_populates="review_item", cascade="all, delete-orphan"
+    )
+
+
+class ReviewEvent(Base):
+    __tablename__ = "review_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    review_item_id: Mapped[str] = mapped_column(
+        ForeignKey("review_items.id", ondelete="CASCADE"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(50), index=True)
+    reviewer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    review_item: Mapped[ReviewItem] = relationship(back_populates="events")

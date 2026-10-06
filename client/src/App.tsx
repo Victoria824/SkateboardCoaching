@@ -9,13 +9,15 @@ import {
   Card,
   CardContent,
   Chip,
-  Divider
+  Divider,
+  Button
 } from '@mui/material';
 import { CloudUpload, Sports, Psychology } from '@mui/icons-material';
 import VideoUpload from './components/VideoUpload';
 import ChatInterface from './components/ChatInterface';
 import MediaPipeline from './components/MediaPipeline';
 import AnnotationWorkspace from './components/AnnotationWorkspace';
+import DatasetHealthDashboard from './components/DatasetHealthDashboard';
 import API_BASE_URL from './config';
 import './App.css';
 
@@ -37,12 +39,27 @@ interface AnalysisResult {
   }>;
 }
 
+const currentRoutePath = () => window.location.hash.startsWith('#/')
+  ? window.location.hash.slice(1)
+  : window.location.pathname;
+
 function App() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'assistant', content: string}>>([]);
   const [uploadedVideo, setUploadedVideo] = useState<File | null>(null);
+  const [routePath, setRoutePath] = useState(currentRoutePath);
   const analysisResultRef = useRef<AnalysisResult | null>(null);
+
+  useEffect(() => {
+    const updateRoute = () => setRoutePath(currentRoutePath());
+    window.addEventListener('hashchange', updateRoute);
+    window.addEventListener('popstate', updateRoute);
+    return () => {
+      window.removeEventListener('hashchange', updateRoute);
+      window.removeEventListener('popstate', updateRoute);
+    };
+  }, []);
 
   useEffect(() => {
     analysisResultRef.current = analysisResult;
@@ -169,9 +186,12 @@ function App() {
     }
   };
 
-  const annotationRoute = window.location.pathname.match(/^\/annotate\/([^/]+)\/?$/);
+  const annotationRoute = routePath.match(/^\/annotate\/([^/]+)\/?$/);
   if (annotationRoute) {
     return <AnnotationWorkspace taskId={annotationRoute[1]} />;
+  }
+  if (routePath.match(/^\/quality\/?$/)) {
+    return <DatasetHealthDashboard />;
   }
 
   return (
@@ -283,6 +303,13 @@ function App() {
           }}>
             Upload your snowboarding video and get personalized coaching advice powered by AI
           </Typography>
+          <Button
+            href="/#/quality"
+            variant="outlined"
+            sx={{ mt: 2, color: 'white', borderColor: 'rgba(255,255,255,.65)', position: 'relative', zIndex: 1 }}
+          >
+            Open dataset health
+          </Button>
         </Paper>
 
         <MediaPipeline />

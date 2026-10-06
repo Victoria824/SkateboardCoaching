@@ -135,7 +135,7 @@ const MediaPipeline: React.FC = () => {
             </Alert>
             <Box mt={2}>
               {taskId ? (
-                <Button variant="contained" href={`/annotate/${taskId}`}>Open annotation workspace</Button>
+                <Button variant="contained" href={`/#/annotate/${taskId}`}>Open annotation workspace</Button>
               ) : (
                 <Button variant="outlined" onClick={prepareAnnotationTask}>Create annotation task</Button>
               )}

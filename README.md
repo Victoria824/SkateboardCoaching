@@ -13,6 +13,10 @@ snowboarding footage and records temporal and semantic failure modes. See
 [the evaluation report](docs/real-video-evaluation.md) and
 [the Milestone 4 plan](docs/milestone-4-plan.md).
 
+Milestone 4A adds automatic quality routing, random audits, review events, multi-annotator IoU/PCK
+agreement, and a dataset-health dashboard. See
+[the review and dataset-health workflow](docs/review-and-dataset-health.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

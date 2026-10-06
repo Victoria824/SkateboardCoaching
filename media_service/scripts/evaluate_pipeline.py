@@ -25,7 +25,14 @@ sys.path.insert(0, str(SERVICE_ROOT))
 
 from app.database import Base  # noqa: E402
 from app.inference import UltralyticsProvider  # noqa: E402
-from app.models import Frame, ModelPrediction, ModelRun, ProcessingJob, Video  # noqa: E402
+from app.models import (  # noqa: E402
+    Frame,
+    ModelPrediction,
+    ModelRun,
+    ProcessingJob,
+    ReviewItem,
+    Video,
+)
 from app.service import claim_next_job, process_inference_job, process_job  # noqa: E402
 from app.storage import LocalStorage  # noqa: E402
 
@@ -249,6 +256,14 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
                         **prediction_summary(predictions, args.include_predictions),
                     }
                 )
+            review_items = list(session.scalars(select(ReviewItem)).all())
+            report["review_queue"] = {
+                "total": len(review_items),
+                "by_reason": dict(sorted(Counter(item.reason for item in review_items).items())),
+                "by_severity": dict(
+                    sorted(Counter(item.severity for item in review_items).items())
+                ),
+            }
             return report
 
 

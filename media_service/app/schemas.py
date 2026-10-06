@@ -199,3 +199,64 @@ class ModelMetricsResponse(BaseModel):
     rejection_rate: float
     average_decision_time_ms: Optional[float]
     by_label: Dict[str, Dict[str, int]]
+
+
+class ReviewItemResponse(BaseModel):
+    id: str
+    video_id: str
+    frame_id: str
+    model_run_id: str
+    prediction_id: Optional[str]
+    reason: str
+    severity: str
+    status: str
+    score: Optional[float]
+    details: Dict[str, Any]
+    frame_number: int
+    timestamp_ms: int
+    image_url: str
+    prediction_label: Optional[str]
+    prediction_confidence: Optional[float]
+    annotation_task_id: Optional[str]
+    created_at: datetime
+    resolved_at: Optional[datetime]
+
+
+class ReviewResolveRequest(BaseModel):
+    action: Literal["APPROVED", "DISMISSED", "ESCALATED", "NEEDS_CORRECTION"]
+    reviewer: Optional[str] = Field(default=None, max_length=255)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AgreementResponse(BaseModel):
+    video_id: Optional[str]
+    bbox_comparisons: int
+    mean_bbox_iou: Optional[float]
+    keypoint_comparisons: int
+    mean_keypoint_pck: Optional[float]
+
+
+class DatasetHealthResponse(BaseModel):
+    video_id: Optional[str]
+    videos: int
+    frames: int
+    annotated_frames: int
+    reviewed_frames: int
+    pending_tasks: int
+    completed_tasks: int
+    total_predictions: int
+    accepted_predictions: int
+    corrected_predictions: int
+    rejected_predictions: int
+    pending_predictions: int
+    model_acceptance_rate: float
+    model_correction_rate: float
+    model_rejection_rate: float
+    low_confidence_predictions: int
+    open_review_items: int
+    resolved_review_items: int
+    average_annotation_time_ms: Optional[float]
+    annotation_throughput_per_hour: Optional[float]
+    label_distribution: Dict[str, int]
+    review_reason_distribution: Dict[str, int]
+    agreement: AgreementResponse

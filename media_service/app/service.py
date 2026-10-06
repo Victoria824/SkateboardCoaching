@@ -9,6 +9,7 @@ from .config import settings
 from .inference import InferenceError, PredictionProvider, UltralyticsProvider
 from .media import FFmpegProcessor, MediaProcessingError
 from .models import Frame, ModelPrediction, ModelRun, ProcessingJob, Video
+from .quality import route_model_run_reviews
 from .storage import LocalStorage
 
 
@@ -200,6 +201,7 @@ def process_inference_job(
         job.state = "COMPLETED"
         job.progress = 100
         job.completed_at = completed_at
+        route_model_run_reviews(session, model_run)
         session.commit()
     except InferenceError as error:
         record_inference_failure(session, job_id, error.code, str(error))

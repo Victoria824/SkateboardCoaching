@@ -449,6 +449,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       <Paper sx={{ p: 1.5, mb: 2, bgcolor: '#1f2937', color: 'white' }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
           <Button href="/" color="inherit" startIcon={<ArrowBack />}>Coach</Button>
+          <Button href="/#/quality" color="inherit">Quality</Button>
           <Typography fontWeight={700} flex={1}>Annotation task · {task.video?.filename}</Typography>
           <Chip label={task.status} color="primary" size="small" />
           <Typography variant="body2">Frame {frameIndex + 1} / {frames.length} · {(frame.timestamp_ms / 1000).toFixed(1)}s</Typography>
