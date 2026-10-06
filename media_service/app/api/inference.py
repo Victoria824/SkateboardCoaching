@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from ..database import get_session
 from ..models import (
+    Annotation,
+    AnnotationActivity,
+    AnnotationPropagation,
     AnnotationTask,
     Frame,
     ModelPrediction,
@@ -15,6 +18,7 @@ from ..models import (
     ProcessingJob,
     Video,
 )
+from ..propagation import apply_bbox_delta, bbox_delta, has_correction
 from ..schemas import (
     JobResponse,
     ModelMetricsResponse,
@@ -24,6 +28,8 @@ from ..schemas import (
     ModelRunResponse,
     PredictionDecisionResponse,
     PredictionRejectRequest,
+    TrackPropagationRequest,
+    TrackPropagationResponse,
 )
 
 
@@ -151,6 +157,130 @@ def reject_prediction(
     )
     session.commit()
     return PredictionDecisionResponse(prediction_id=prediction.id, status=prediction.status)
+
+
+@router.post(
+    "/predictions/{prediction_id}/propagate",
+    response_model=TrackPropagationResponse,
+)
+def propagate_prediction(
+    prediction_id: str,
+    request: TrackPropagationRequest,
+    session: Session = Depends(get_session),
+) -> TrackPropagationResponse:
+    prediction = session.get(ModelPrediction, prediction_id)
+    task = session.get(AnnotationTask, request.task_id)
+    if prediction is None:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    if task is None or prediction.model_run.video_id != task.video_id:
+        raise HTTPException(status_code=404, detail="Prediction does not belong to this task")
+    if prediction.annotation_type != "bbox" or prediction.track_id is None:
+        raise HTTPException(status_code=409, detail="Only tracked bounding boxes can be propagated")
+    if not request.start_frame_number <= prediction.frame.frame_number <= request.end_frame_number:
+        raise HTTPException(status_code=422, detail="Propagation range must include the source frame")
+
+    delta = bbox_delta(prediction.geometry, request.geometry)
+    corrected = has_correction(delta)
+    target_predictions = list(
+        session.scalars(
+            select(ModelPrediction)
+            .join(Frame)
+            .where(
+                ModelPrediction.model_run_id == prediction.model_run_id,
+                ModelPrediction.track_id == prediction.track_id,
+                ModelPrediction.annotation_type == "bbox",
+                Frame.frame_number >= request.start_frame_number,
+                Frame.frame_number <= request.end_frame_number,
+            )
+            .order_by(Frame.frame_number)
+        ).all()
+    )
+    if not target_predictions:
+        raise HTTPException(status_code=409, detail="No tracked predictions exist in this range")
+
+    propagation = AnnotationPropagation(
+        task_id=task.id,
+        model_run_id=prediction.model_run_id,
+        source_prediction_id=prediction.id,
+        source_frame_id=prediction.frame_id,
+        track_id=prediction.track_id,
+        start_frame_number=request.start_frame_number,
+        end_frame_number=request.end_frame_number,
+        source_geometry=request.geometry,
+        correction_delta=delta,
+        reviewer=request.reviewer,
+    )
+    session.add(propagation)
+    session.flush()
+
+    annotations = []
+    for target in target_predictions:
+        geometry = apply_bbox_delta(target.geometry, delta)
+        annotation = session.scalar(
+            select(Annotation)
+            .where(
+                Annotation.task_id == task.id,
+                Annotation.model_prediction_id == target.id,
+            )
+            .order_by(Annotation.created_at.desc())
+            .limit(1)
+        )
+        if annotation is None:
+            annotation = Annotation(
+                task_id=task.id,
+                frame_id=target.frame_id,
+                label=prediction.label,
+                annotation_type="bbox",
+                geometry=geometry,
+                source="track_propagated",
+                model_prediction_id=target.id,
+                propagation_id=propagation.id,
+            )
+            session.add(annotation)
+        else:
+            annotation.label = prediction.label
+            annotation.geometry = geometry
+            annotation.source = "track_propagated"
+            annotation.propagation_id = propagation.id
+        annotations.append((annotation, target))
+
+    session.flush()
+    decision_action = "PROPAGATED_CORRECTION" if corrected else "PROPAGATED_ACCEPTANCE"
+    prediction_status = "CORRECTED" if corrected else "ACCEPTED"
+    for annotation, target in annotations:
+        target.status = prediction_status
+        target.resolved_at = datetime.utcnow()
+        session.add(
+            PredictionDecision(
+                prediction_id=target.id,
+                task_id=task.id,
+                annotation_id=annotation.id,
+                action=decision_action,
+                duration_ms=request.duration_ms,
+            )
+        )
+    propagation.generated_count = len(annotations)
+    session.add(
+        AnnotationActivity(
+            task_id=task.id,
+            frame_id=prediction.frame_id,
+            action="TRACK_PROPAGATE",
+            duration_ms=request.duration_ms,
+            annotation_count=len(annotations),
+        )
+    )
+    if task.status == "PENDING":
+        task.status = "IN_PROGRESS"
+    session.commit()
+    return TrackPropagationResponse(
+        propagation_id=propagation.id,
+        track_id=propagation.track_id,
+        start_frame_number=propagation.start_frame_number,
+        end_frame_number=propagation.end_frame_number,
+        generated_count=propagation.generated_count,
+        corrected=corrected,
+        frame_ids=[target.frame_id for _, target in annotations],
+    )
 
 
 @router.get("/model-runs/{model_run_id}/metrics", response_model=ModelMetricsResponse)

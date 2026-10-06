@@ -2,11 +2,11 @@
 
 ## Status
 
-Milestones 4A and 4B are implemented through temporal inference: IoU/PCK agreement primitives,
+Milestones 4A, 4B, and the first 4C slice are implemented through temporal correction: IoU/PCK agreement primitives,
 automatic review routing, the `/quality` dashboard, 1 FPS/5 FPS sampling profiles, persisted track
-IDs, ByteTrack plus deterministic geometry fallback, and explicit person-to-board association.
-Milestone 4C remains focused on correction propagation, motion-aware bursts, exact clip boundaries,
-and a versioned gold-label manifest with scored precision/recall.
+IDs, ByteTrack plus deterministic geometry fallback, explicit person-to-board association,
+reviewer-controlled correction propagation, and a versioned gold-label evaluator. Remaining 4C
+work is the human labeling pass, motion-aware bursts, and exact clip boundaries.
 
 ## Objective
 

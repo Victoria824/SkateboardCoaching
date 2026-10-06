@@ -60,8 +60,9 @@ class AnnotationInput(BaseModel):
     label: str = Field(min_length=1, max_length=100)
     annotation_type: Literal["bbox", "keypoints"]
     geometry: Dict[str, Any]
-    source: Literal["human", "model", "model_corrected"] = "human"
+    source: Literal["human", "model", "model_corrected", "track_propagated"] = "human"
     model_prediction_id: Optional[str] = None
+    propagation_id: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_geometry(self):
@@ -193,6 +194,37 @@ class PredictionDecisionResponse(BaseModel):
     status: str
 
 
+class TrackPropagationRequest(BaseModel):
+    task_id: str
+    start_frame_number: int = Field(ge=1)
+    end_frame_number: int = Field(ge=1)
+    geometry: Dict[str, Any]
+    reviewer: Optional[str] = Field(default=None, max_length=255)
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_propagation(self):
+        if self.start_frame_number > self.end_frame_number:
+            raise ValueError("start_frame_number must not exceed end_frame_number")
+        AnnotationInput(
+            label="propagated",
+            annotation_type="bbox",
+            geometry=self.geometry,
+            source="model_corrected",
+        )
+        return self
+
+
+class TrackPropagationResponse(BaseModel):
+    propagation_id: str
+    track_id: str
+    start_frame_number: int
+    end_frame_number: int
+    generated_count: int
+    corrected: bool
+    frame_ids: List[str]
+
+
 class ModelMetricsResponse(BaseModel):
     model_run_id: str
     total_predictions: int
@@ -249,6 +281,8 @@ class DatasetHealthResponse(BaseModel):
     videos: int
     frames: int
     annotated_frames: int
+    propagated_annotations: int
+    propagation_operations: int
     reviewed_frames: int
     pending_tasks: int
     completed_tasks: int

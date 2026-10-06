@@ -11,6 +11,7 @@ from ..database import get_session
 from ..models import (
     Annotation,
     AnnotationActivity,
+    AnnotationPropagation,
     AnnotationTask,
     Frame,
     ModelPrediction,
@@ -156,6 +157,7 @@ def dataset_health(video_id: Optional[str] = None, session: Session = Depends(ge
     predictions_query = select(ModelPrediction).join(Frame)
     reviews_query = select(ReviewItem)
     activities_query = select(AnnotationActivity).join(Frame)
+    propagations_query = select(AnnotationPropagation).join(AnnotationTask)
     if video_id:
         frames_query = frames_query.where(Frame.video_id == video_id)
         tasks_query = tasks_query.where(AnnotationTask.video_id == video_id)
@@ -163,6 +165,7 @@ def dataset_health(video_id: Optional[str] = None, session: Session = Depends(ge
         predictions_query = predictions_query.where(Frame.video_id == video_id)
         reviews_query = reviews_query.where(ReviewItem.video_id == video_id)
         activities_query = activities_query.where(Frame.video_id == video_id)
+        propagations_query = propagations_query.where(AnnotationTask.video_id == video_id)
 
     frames = list(session.scalars(frames_query).all())
     tasks = list(session.scalars(tasks_query).all())
@@ -170,6 +173,7 @@ def dataset_health(video_id: Optional[str] = None, session: Session = Depends(ge
     predictions = list(session.scalars(predictions_query).all())
     reviews = list(session.scalars(reviews_query).all())
     activities = list(session.scalars(activities_query).all())
+    propagations = list(session.scalars(propagations_query).all())
 
     prediction_counts = Counter(prediction.status for prediction in predictions)
     decided = sum(prediction_counts[state] for state in ("ACCEPTED", "CORRECTED", "REJECTED"))
@@ -183,6 +187,8 @@ def dataset_health(video_id: Optional[str] = None, session: Session = Depends(ge
         videos=len(videos),
         frames=len(frames),
         annotated_frames=len({annotation.frame_id for annotation in annotations}),
+        propagated_annotations=sum(annotation.propagation_id is not None for annotation in annotations),
+        propagation_operations=len(propagations),
         reviewed_frames=len(
             {item.frame_id for item in reviews if item.status in {"RESOLVED", "ESCALATED"}}
         ),

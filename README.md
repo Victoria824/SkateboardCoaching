@@ -21,6 +21,10 @@ Milestone 4B adds selectable 1 FPS/5 FPS sampling, ByteTrack-backed temporal ide
 short-term geometry fallback, explicit person-to-snowboard association, temporal review rules,
 and track/association health metrics. See [the temporal tracking workflow](docs/temporal-tracking.md).
 
+Milestone 4C adds reviewer-controlled correction propagation with a complete audit trail and a
+versioned gold-label format for real precision, recall, IoU, and association scoring. See
+[the gold evaluation workflow](docs/gold-evaluation.md).
+
 ## ✨ Features
 
 - **Video Upload**: Drag and drop or click to upload snowboarding videos

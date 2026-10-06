@@ -17,6 +17,8 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
 - Uploads support `overview` (1 FPS), `action` (5 FPS), and validated custom sampling rates.
 - Detection and pose predictions retain temporal track IDs; person detections become riders only
   after a persisted snowboard association or association-backed track confirmation.
+- Reviewers can propagate an accepted or corrected tracked box across a bounded frame range; every
+  generated annotation and prediction decision links to an immutable propagation audit record.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -58,6 +60,18 @@ the development database:
 The source video, extracted frames, and JSON output belong under the ignored `data/` directory.
 See [the real-video findings](../docs/real-video-evaluation.md) for the recorded methodology and
 results.
+
+Create a report with `--include-predictions`, then score only reviewer-approved gold frames:
+
+```bash
+.venv/bin/python scripts/evaluate_gold.py \
+  evaluation/gold_manifest.json \
+  data/evaluation/report.json \
+  --output data/evaluation/gold-metrics.json
+```
+
+The schema and starter manifest live in `evaluation/`. See
+[the gold evaluation workflow](../docs/gold-evaluation.md).
 
 Database schema changes are managed exclusively by Alembic. API and worker startup never mutate
 the schema. Docker Compose runs the migration automatically before starting either process.

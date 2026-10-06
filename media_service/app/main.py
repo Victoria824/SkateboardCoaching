@@ -17,6 +17,7 @@ from .database import get_session
 from .models import (
     Annotation,
     AnnotationActivity,
+    AnnotationPropagation,
     AnnotationTask,
     Frame,
     ModelPrediction,
@@ -298,6 +299,11 @@ def save_annotations(
     session.add_all(saved)
     session.flush()
     for annotation in saved:
+        if annotation.propagation_id:
+            propagation = session.get(AnnotationPropagation, annotation.propagation_id)
+            if propagation is None or propagation.task_id != task_id:
+                session.rollback()
+                raise HTTPException(status_code=422, detail="Invalid propagation reference")
         if not annotation.model_prediction_id:
             continue
         prediction = session.get(ModelPrediction, annotation.model_prediction_id)

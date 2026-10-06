@@ -39,10 +39,21 @@ The quality router creates review items for unassociated snowboards, ambiguous a
 track gaps. The annotation workspace shows track and association provenance, while dataset health
 reports track counts, tracked prediction volume, and linked/unlinked snowboards.
 
+## Reviewer-controlled propagation
+
+A reviewer can accept a tracked prediction or edit its box and propagate it over ±1, ±2, or ±5
+sampled frames. Propagation uses each target frame's tracked geometry rather than copying one static
+box. For a correction, the source frame's normalized position and size delta is applied to every
+target and clamped to the image boundary.
+
+The operation never replaces unrelated human annotations. It creates or updates only annotations
+that reference predictions on the same model run and track. Every operation stores its source
+prediction, source geometry, correction delta, frame range, reviewer, and generated count. Each
+target prediction also receives a decision record, and generated annotations link back to the
+propagation record.
+
 ## Current boundary
 
-Track identity and semantic association are model-generated proposals, not ground truth. The next
-slice should let a reviewer propagate a corrected box over a selected frame range and persist every
-generated annotation with its source prediction, track, range, and reviewer action. A versioned
-gold-label manifest is still required to measure precision, recall, association accuracy, and ID
-switches.
+Track identity and semantic association remain model-generated proposals, not ground truth. A
+versioned manifest and evaluator now exist, but the real clips still require a two-person annotation
+and review pass before precision, recall, association accuracy, or ID-switch metrics can be claimed.

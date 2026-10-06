@@ -55,16 +55,28 @@ export interface AnnotationRecord {
   label: string;
   annotation_type: 'bbox' | 'keypoints';
   geometry: Record<string, any>;
-  source: 'human' | 'model' | 'model_corrected';
+  source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
+  propagation_id?: string | null;
 }
 
 export interface AnnotationDraft {
   label: string;
   annotation_type: 'bbox' | 'keypoints';
   geometry: Record<string, any>;
-  source: 'human' | 'model' | 'model_corrected';
+  source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
+  propagation_id?: string | null;
+}
+
+export interface TrackPropagationResult {
+  propagation_id: string;
+  track_id: string;
+  start_frame_number: number;
+  end_frame_number: number;
+  generated_count: number;
+  corrected: boolean;
+  frame_ids: string[];
 }
 
 export interface ModelRun {
@@ -128,6 +140,8 @@ export interface DatasetHealth {
   videos: number;
   frames: number;
   annotated_frames: number;
+  propagated_annotations: number;
+  propagation_operations: number;
   reviewed_frames: number;
   pending_tasks: number;
   completed_tasks: number;
@@ -292,6 +306,30 @@ export async function rejectModelPrediction(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: taskId, duration_ms: durationMs }),
+    })
+  );
+}
+
+export async function propagateTrackPrediction(
+  predictionId: string,
+  taskId: string,
+  geometry: Record<string, any>,
+  startFrameNumber: number,
+  endFrameNumber: number,
+  durationMs: number
+): Promise<TrackPropagationResult> {
+  return parseResponse<TrackPropagationResult>(
+    await fetch(`${MEDIA_API_BASE_URL}/api/predictions/${predictionId}/propagate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task_id: taskId,
+        geometry,
+        start_frame_number: startFrameNumber,
+        end_frame_number: endFrameNumber,
+        duration_ms: durationMs,
+        reviewer: 'portfolio-reviewer',
+      }),
     })
   );
 }

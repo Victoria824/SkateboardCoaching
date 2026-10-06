@@ -109,6 +109,7 @@ const DatasetHealthDashboard: React.FC = () => {
         {health && <>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap mb={3}>
             <MetricCard label="Frames" value={health.frames} detail={`${health.annotated_frames} annotated`} />
+            <MetricCard label="Propagated" value={health.propagated_annotations} detail={`${health.propagation_operations} audited operations`} />
             <MetricCard label="Needs review" value={health.open_review_items} detail={`${health.resolved_review_items} resolved`} />
             <MetricCard label="Acceptance" value={`${(health.model_acceptance_rate * 100).toFixed(0)}%`} detail={`${health.total_predictions} predictions`} />
             <MetricCard label="Temporal tracks" value={health.tracks} detail={`${health.tracked_predictions} tracked predictions`} />

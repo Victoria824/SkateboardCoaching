@@ -119,6 +119,9 @@ class AnnotationTask(Base):
     annotations: Mapped[List["Annotation"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
+    propagations: Mapped[List["AnnotationPropagation"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
     activity_events: Mapped[List["AnnotationActivity"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
@@ -137,11 +140,46 @@ class Annotation(Base):
     model_prediction_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("model_predictions.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    propagation_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("annotation_propagations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     task: Mapped[AnnotationTask] = relationship(back_populates="annotations")
     frame: Mapped[Frame] = relationship(back_populates="annotations")
+    propagation: Mapped[Optional["AnnotationPropagation"]] = relationship(
+        back_populates="annotations"
+    )
+
+
+class AnnotationPropagation(Base):
+    __tablename__ = "annotation_propagations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("annotation_tasks.id", ondelete="CASCADE"), index=True
+    )
+    model_run_id: Mapped[str] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="CASCADE"), index=True
+    )
+    source_prediction_id: Mapped[str] = mapped_column(
+        ForeignKey("model_predictions.id", ondelete="CASCADE"), index=True
+    )
+    source_frame_id: Mapped[str] = mapped_column(
+        ForeignKey("frames.id", ondelete="CASCADE"), index=True
+    )
+    track_id: Mapped[str] = mapped_column(String(100), index=True)
+    start_frame_number: Mapped[int] = mapped_column(Integer)
+    end_frame_number: Mapped[int] = mapped_column(Integer)
+    source_geometry: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    correction_delta: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    generated_count: Mapped[int] = mapped_column(Integer, default=0)
+    reviewer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    task: Mapped[AnnotationTask] = relationship(back_populates="propagations")
+    annotations: Mapped[List[Annotation]] = relationship(back_populates="propagation")
 
 
 class AnnotationActivity(Base):

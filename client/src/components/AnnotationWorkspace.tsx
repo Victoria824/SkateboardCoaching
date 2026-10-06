@@ -42,6 +42,7 @@ import {
   getModelRun,
   getVideoModelRuns,
   mediaUrl,
+  propagateTrackPrediction,
   rejectModelPrediction,
   saveFrameAnnotations,
 } from '../mediaApi';
@@ -84,6 +85,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [propagationRadius, setPropagationRadius] = useState(2);
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const frameStartedAt = useRef(Date.now());
@@ -92,6 +94,10 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const frames = task?.video?.frames || [];
   const frame = frames[frameIndex];
   const selectedPrediction = predictions.find((item) => item.id === selectedPredictionId) || null;
+  const selectedAnnotation = annotations.find((item) => item.id === selectedId) || null;
+  const propagationPrediction = selectedPrediction || predictions.find(
+    (item) => item.id === selectedAnnotation?.model_prediction_id
+  ) || null;
 
   useEffect(() => {
     getAnnotationTask(taskId)
@@ -128,6 +134,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
           geometry: record.geometry,
           source: record.source,
           model_prediction_id: record.model_prediction_id,
+          propagation_id: record.propagation_id,
         })));
         setPredictions(predictionRecords);
         const latestRunId = predictionRecords[predictionRecords.length - 1]?.model_run_id;
@@ -287,6 +294,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         geometry: record.geometry,
         source: record.source,
         model_prediction_id: record.model_prediction_id,
+        propagation_id: record.propagation_id,
       })));
       setDirty(false);
       setMessage(`Saved ${saved.length} annotations`);
@@ -351,6 +359,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         geometry: record.geometry,
         source: record.source,
         model_prediction_id: record.model_prediction_id,
+        propagation_id: record.propagation_id,
       })));
       setPredictions(await getFramePredictions(frame.id));
       setSelectedPredictionId(null);
@@ -396,6 +405,53 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
       setError(requestError instanceof Error ? requestError.message : 'Unable to reject prediction.');
     }
   }, [selectedPrediction, taskId]);
+
+  const propagateTrack = async () => {
+    if (!frame || !propagationPrediction?.track_id || propagationPrediction.annotation_type !== 'bbox') return;
+    const sourceGeometry = selectedAnnotation?.model_prediction_id === propagationPrediction.id
+      ? selectedAnnotation.geometry
+      : propagationPrediction.geometry;
+    if (dirty && !await save()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const startFrame = Math.max(1, frame.frame_number - propagationRadius);
+      const endFrame = Math.min(frames.length, frame.frame_number + propagationRadius);
+      const result = await propagateTrackPrediction(
+        propagationPrediction.id,
+        taskId,
+        sourceGeometry,
+        startFrame,
+        endFrame,
+        Date.now() - decisionStartedAt.current
+      );
+      const [records, predictionRecords] = await Promise.all([
+        getFrameAnnotations(taskId, frame.id),
+        getFramePredictions(frame.id),
+      ]);
+      setAnnotations(records.map((record) => ({
+        id: record.id,
+        label: record.label,
+        annotation_type: record.annotation_type,
+        geometry: record.geometry,
+        source: record.source,
+        model_prediction_id: record.model_prediction_id,
+        propagation_id: record.propagation_id,
+      })));
+      setPredictions(predictionRecords);
+      setSelectedId(null);
+      setSelectedPredictionId(null);
+      setDirty(false);
+      setMessage(
+        `${result.corrected ? 'Correction' : 'Prediction'} propagated to ${result.generated_count} tracked frames`
+      );
+      setMetrics(await getModelMetrics(propagationPrediction.model_run_id));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to propagate track.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const completeTask = async () => {
     if (dirty && !await save()) return;
@@ -507,7 +563,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                 const selected = selectedId === annotation.id;
                 const annotationColor = annotation.source === 'model'
                   ? '#22c55e'
-                  : annotation.source === 'model_corrected' ? '#a855f7' : '#0ea5e9';
+                  : annotation.source === 'model_corrected'
+                    ? '#a855f7'
+                    : annotation.source === 'track_propagated' ? '#14b8a6' : '#0ea5e9';
                 return <g key={annotation.id}>
                   <rect
                     x={box.x * 1000} y={box.y * 1000} width={box.width * 1000} height={box.height * 1000}
@@ -562,6 +620,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Chip size="small" label={`${predictions.filter((item) => item.status === 'PENDING').length} pending`} sx={{ bgcolor: '#fef3c7' }} />
             <Chip size="small" label="Model" sx={{ color: '#15803d' }} />
             <Chip size="small" label="Corrected" sx={{ color: '#9333ea' }} />
+            <Chip size="small" label="Propagated" sx={{ color: '#0f766e' }} />
           </Stack>
           {selectedPrediction && (
             <Box sx={{ p: 1.5, mb: 2, bgcolor: '#fff7ed', borderRadius: 1 }}>
@@ -578,6 +637,28 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                 <Button size="small" color="success" startIcon={<Check />} onClick={acceptPrediction}>Accept</Button>
                 <Button size="small" startIcon={<Edit />} onClick={correctPrediction}>Correct</Button>
                 <Button size="small" color="error" startIcon={<Close />} onClick={rejectPrediction}>Reject</Button>
+              </Stack>
+            </Box>
+          )}
+          {propagationPrediction?.track_id && propagationPrediction.annotation_type === 'bbox' && (
+            <Box sx={{ p: 1.5, mb: 2, bgcolor: '#eff6ff', borderRadius: 1 }}>
+              <Typography variant="subtitle2">Track propagation · #{propagationPrediction.track_id}</Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                Applies this {selectedAnnotation ? 'corrected box' : 'prediction'} to matching track frames without overwriting unrelated human labels.
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Select
+                  size="small"
+                  value={propagationRadius}
+                  onChange={(event) => setPropagationRadius(Number(event.target.value))}
+                >
+                  <MenuItem value={1}>±1 frame</MenuItem>
+                  <MenuItem value={2}>±2 frames</MenuItem>
+                  <MenuItem value={5}>±5 frames</MenuItem>
+                </Select>
+                <Button size="small" variant="contained" disabled={saving} onClick={propagateTrack}>
+                  Propagate
+                </Button>
               </Stack>
             </Box>
           )}

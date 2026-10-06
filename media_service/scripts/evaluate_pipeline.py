@@ -119,6 +119,7 @@ def prediction_summary(
     if include_predictions:
         summary["predictions"] = [
             {
+                "id": prediction.id,
                 "frame_number": prediction.frame.frame_number,
                 "timestamp_ms": prediction.frame.timestamp_ms,
                 "label": prediction.label,

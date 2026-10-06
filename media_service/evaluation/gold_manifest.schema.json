@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/snowboard-gold-manifest-v1.schema.json",
+  "title": "Snowboard Vision gold manifest",
+  "type": "object",
+  "required": ["schema_version", "dataset", "videos"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "dataset": {
+      "type": "object",
+      "required": ["name", "created_at"],
+      "properties": {
+        "name": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "guidelines_version": { "type": "string" }
+      }
+    },
+    "videos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "sampling_profile", "sample_fps", "frames"],
+        "properties": {
+          "source": {
+            "type": "object",
+            "required": ["sha256", "url", "creator", "license"],
+            "properties": {
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "url": { "type": "string" },
+              "creator": { "type": "string" },
+              "license": { "type": "string" }
+            }
+          },
+          "sampling_profile": { "enum": ["overview", "action", "custom"] },
+          "sample_fps": { "type": "number", "minimum": 0.1, "maximum": 30 },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["frame_number", "timestamp_ms", "review_status", "objects"],
+              "properties": {
+                "frame_number": { "type": "integer", "minimum": 1 },
+                "timestamp_ms": { "type": "integer", "minimum": 0 },
+                "review_status": { "enum": ["pending", "approved"] },
+                "annotator": { "type": ["string", "null"] },
+                "reviewer": { "type": ["string", "null"] },
+                "difficult_case_tags": { "type": "array", "items": { "type": "string" } },
+                "objects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "label", "annotation_type", "geometry"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "label": { "enum": ["person", "rider", "snowboard", "rider_pose"] },
+                      "annotation_type": { "enum": ["bbox", "keypoints"] },
+                      "geometry": { "type": "object" },
+                      "track_id": { "type": ["string", "null"] },
+                      "associated_object_id": { "type": ["string", "null"] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
