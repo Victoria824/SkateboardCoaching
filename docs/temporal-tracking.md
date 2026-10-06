@@ -10,7 +10,13 @@ The upload API accepts multipart sampling controls:
 
 - `overview`: 1 FPS for scene coverage and lower review cost
 - `action`: 5 FPS for takeoff, rotation, landing, and short failure events
+- `motion`: 1 FPS baseline plus 5 FPS bursts around high-change samples
 - `custom`: an explicit `sample_fps` from 0.1 through 30
+
+Motion-aware extraction analyzes a 64×36 grayscale stream at 5 FPS, measures mean absolute pixel
+change, and retains a ±2-sample burst when change crosses the calibrated 0.75/255 threshold. Static regions
+fall back to one frame per second. Stored timestamps remain tied to the original 5 FPS analysis
+timeline, so variable-rate samples are auditable and seek correctly in the annotation workspace.
 
 The chosen profile and resolved rate are stored on the video. Frame timestamps and extraction use
 that stored rate, so retries and downstream audits reproduce the same sequence. The browser exposes

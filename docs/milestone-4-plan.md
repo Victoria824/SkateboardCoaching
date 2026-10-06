@@ -5,8 +5,8 @@
 Milestones 4A, 4B, and the first 4C slice are implemented through temporal correction: IoU/PCK agreement primitives,
 automatic review routing, the `/quality` dashboard, 1 FPS/5 FPS sampling profiles, persisted track
 IDs, ByteTrack plus deterministic geometry fallback, explicit person-to-board association,
-reviewer-controlled correction propagation, and a versioned gold-label evaluator. Remaining 4C
-work is the human labeling pass, motion-aware bursts, and exact clip boundaries.
+reviewer-controlled correction propagation, a versioned gold-label evaluator, and motion-aware
+1–5 FPS burst sampling. Remaining 4C work is the human labeling pass and exact clip boundaries.
 
 ## Objective
 

@@ -97,6 +97,15 @@ were association-backed `rider` predictions, and 4 were snowboards. These counts
 semantic behavior of the association stage, not association accuracy; gold labels are still
 required before publishing precision or recall.
 
+## Motion-aware sampling check
+
+The jump clip was also processed with a 1 FPS baseline plus 5 FPS motion bursts. The calibrated
+profile retained 61 of the 164 fixed-action samples (37%) and detection completed in 3.8 seconds,
+compared with 9.9 seconds for fixed 5 FPS in the earlier run. It emitted 30 detections on 17 frames,
+versus 35 detections on 22 frames at fixed 5 FPS, and preserved 10 of the 10 association-backed
+snowboard links from that run. These are workload and emitted-prediction comparisons, not recall;
+the approved gold set is required to determine whether any omitted frames contain true objects.
+
 ## Reproduce
 
 Install the media and ML dependencies, obtain a locally licensed test video, then run:

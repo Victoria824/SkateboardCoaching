@@ -60,7 +60,7 @@ app.include_router(quality_router)
 
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
-SAMPLING_PROFILES = {"overview": 1.0, "action": 5.0}
+SAMPLING_PROFILES = {"overview": 1.0, "action": 5.0, "motion": 5.0}
 
 
 def frame_response(frame: Frame) -> FrameResponse:
@@ -117,7 +117,7 @@ def upload_video(
     else:
         raise HTTPException(
             status_code=422,
-            detail="Sampling profile must be overview, action, or custom with sample_fps from 0.1 to 30",
+            detail="Sampling profile must be overview, action, motion, or custom with sample_fps from 0.1 to 30",
         )
     if idempotency_key:
         existing = session.scalar(

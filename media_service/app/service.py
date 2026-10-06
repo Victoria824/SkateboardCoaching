@@ -96,15 +96,24 @@ def process_job(
 
         frame_dir = storage.frame_directory(video.id)
         sample_fps = video.sample_fps or settings.frame_sample_fps
-        extracted = processor.extract_frames(source, frame_dir, sample_fps)
+        if video.sampling_profile == "motion":
+            extracted = processor.extract_motion_aware_frames(source, frame_dir)
+        else:
+            extracted = processor.extract_frames(source, frame_dir, sample_fps)
 
         session.execute(delete(Frame).where(Frame.video_id == video.id))
-        for index, frame_path in enumerate(extracted, start=1):
+        for index, extracted_frame in enumerate(extracted, start=1):
+            frame_path = getattr(extracted_frame, "path", extracted_frame)
+            timestamp_ms = getattr(
+                extracted_frame,
+                "timestamp_ms",
+                round(((index - 1) / sample_fps) * 1000),
+            )
             session.add(
                 Frame(
                     video_id=video.id,
                     frame_number=index,
-                    timestamp_ms=round(((index - 1) / sample_fps) * 1000),
+                    timestamp_ms=timestamp_ms,
                     storage_path=storage.relative_path(frame_path),
                     width=metadata.width,
                     height=metadata.height,

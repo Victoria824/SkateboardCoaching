@@ -14,7 +14,7 @@ This service is the first infrastructure slice of the Snowboard Vision Data Plat
 - Annotation-task endpoints persist normalized boxes, keypoints, task state, and time-per-frame activity.
 - Completed model runs automatically route uncertain or inconsistent predictions to review.
 - Dataset-health endpoints report annotation coverage, review status, IoU/PCK agreement, and throughput.
-- Uploads support `overview` (1 FPS), `action` (5 FPS), and validated custom sampling rates.
+- Uploads support `overview` (1 FPS), `action` (5 FPS), motion-aware 1–5 FPS bursts, and validated custom sampling rates.
 - Detection and pose predictions retain temporal track IDs; person detections become riders only
   after a persisted snowboard association or association-backed track confirmation.
 - Reviewers can propagate an accepted or corrected tracked box across a bounded frame range; every

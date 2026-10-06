@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Frame sampling rate. Use 1 for overview or 5 for action labeling.",
     )
+    parser.add_argument(
+        "--sampling-profile",
+        choices=("overview", "action", "motion", "custom"),
+        help="Stored sampling policy. Motion uses a 1 FPS baseline with 5 FPS bursts.",
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--source-url")
     parser.add_argument("--source-creator")
@@ -154,16 +159,17 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
         storage = LocalStorage((work_directory / "media").resolve())
 
         with Session() as session:
+            sampling_profile = args.sampling_profile or (
+                "action"
+                if args.sample_fps == 5
+                else "overview" if args.sample_fps == 1 else "custom"
+            )
             video = Video(
                 filename=source.name,
                 storage_path="pending",
                 mime_type="video/{}".format(source.suffix.lstrip(".") or "unknown"),
                 file_size=source.stat().st_size,
-                sampling_profile=(
-                    "action"
-                    if args.sample_fps == 5
-                    else "overview" if args.sample_fps == 1 else "custom"
-                ),
+                sampling_profile=sampling_profile,
                 sample_fps=args.sample_fps,
                 status="QUEUED",
             )
@@ -215,6 +221,27 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
                     "sample_fps": video.sample_fps,
                     "sample_interval_ms": (
                         video.frames[1].timestamp_ms - video.frames[0].timestamp_ms
+                        if len(video.frames) > 1
+                        else None
+                    ),
+                    "sample_intervals_ms": (
+                        {
+                            "min": min(
+                                right.timestamp_ms - left.timestamp_ms
+                                for left, right in zip(video.frames, video.frames[1:])
+                            ),
+                            "median": percentile(
+                                (
+                                    right.timestamp_ms - left.timestamp_ms
+                                    for left, right in zip(video.frames, video.frames[1:])
+                                ),
+                                0.5,
+                            ),
+                            "max": max(
+                                right.timestamp_ms - left.timestamp_ms
+                                for left, right in zip(video.frames, video.frames[1:])
+                            ),
+                        }
                         if len(video.frames) > 1
                         else None
                     ),

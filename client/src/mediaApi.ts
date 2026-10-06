@@ -28,7 +28,7 @@ export interface ProcessedVideo {
   width?: number | null;
   height?: number | null;
   codec?: string | null;
-  sampling_profile: 'overview' | 'action' | 'custom';
+  sampling_profile: 'overview' | 'action' | 'motion' | 'custom';
   sample_fps: number;
   status: string;
   frames: ProcessedFrame[];
@@ -198,7 +198,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 export async function ingestVideo(
   file: File,
-  samplingProfile: 'overview' | 'action' = 'overview'
+  samplingProfile: 'overview' | 'action' | 'motion' = 'overview'
 ): Promise<UploadResult> {
   const formData = new FormData();
   formData.append('video', file);

@@ -32,7 +32,7 @@ const MediaPipeline: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [samplingProfile, setSamplingProfile] = useState<'overview' | 'action'>('overview');
+  const [samplingProfile, setSamplingProfile] = useState<'overview' | 'action' | 'motion'>('overview');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -110,10 +110,11 @@ const MediaPipeline: React.FC = () => {
               size="small"
               value={samplingProfile}
               disabled={active}
-              onChange={(event) => setSamplingProfile(event.target.value as 'overview' | 'action')}
+              onChange={(event) => setSamplingProfile(event.target.value as 'overview' | 'action' | 'motion')}
             >
               <MenuItem value="overview">Overview · 1 FPS</MenuItem>
               <MenuItem value="action">Action · 5 FPS</MenuItem>
+              <MenuItem value="motion">Motion-aware · 1–5 FPS</MenuItem>
             </Select>
             <input ref={inputRef} hidden type="file" accept="video/*,.mkv" onChange={handleFile} />
             <Button
