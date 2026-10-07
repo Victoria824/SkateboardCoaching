@@ -181,6 +181,9 @@ class SanitizedExport(Base):
     processing_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    residual_scan_status: Mapped[str] = mapped_column(String(30), default="NOT_RUN")
+    residual_findings: Mapped[int] = mapped_column(Integer, default=0)
+    residual_model_version: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

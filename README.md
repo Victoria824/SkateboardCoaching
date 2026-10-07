@@ -45,9 +45,12 @@ recoverable worker leases, and transactional-outbox Redis/Celery delivery. See
 [distributed queue delivery](docs/distributed-queue.md).
 
 Milestone 6B adds YOLO snowboard instance-segmentation proposals, polygon acceptance/rejection in
-the reviewer, temporal polygon identities, and COCO/YOLO segmentation export. PII sanitization
-continues to use conservative reviewed boxes until mask-specific gold evidence and brush editing are
-available; this boundary is documented in [production readiness](docs/production-readiness.md).
+the reviewer, temporal polygon identities, and COCO/YOLO segmentation export.
+
+Milestone 6C adds conservative PII pixel-mask proposals, reviewer paint/erase correction, exact
+FFmpeg masked blur, COCO RLE export, and a fail-closed residual-PII release gate. See
+[privacy sanitization](docs/privacy-sanitization.md) and
+[production readiness](docs/production-readiness.md).
 
 ## ✨ Features
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_session
 from ..models import Annotation, AnnotationTask, SanitizedExport
+from ..privacy import decode_mask_rle
 from ..storage import create_storage
 
 
@@ -28,7 +29,7 @@ def _task(task_id: str, session: Session) -> AnnotationTask:
 
 def coco_payload(task: AnnotationTask):
     annotations = [
-        item for item in task.annotations if item.annotation_type in {"bbox", "polygon"}
+        item for item in task.annotations if item.annotation_type in {"bbox", "polygon", "mask"}
     ]
     labels = sorted({item.label for item in annotations})
     category_ids = {label: index + 1 for index, label in enumerate(labels)}
@@ -52,7 +53,50 @@ def coco_payload(task: AnnotationTask):
         if not width or not height:
             raise HTTPException(status_code=409, detail="Frame dimensions are required for export")
         geometry = annotation.geometry
-        if annotation.annotation_type == "polygon":
+        if annotation.annotation_type == "mask":
+            mask_width = int(geometry["width"])
+            mask_height = int(geometry["height"])
+            pixels = decode_mask_rle(geometry)
+            full_pixels = [
+                pixels[
+                    min(mask_height - 1, int(row * mask_height / height)) * mask_width
+                    + min(mask_width - 1, int(column * mask_width / width))
+                ]
+                for row in range(height)
+                for column in range(width)
+            ]
+            occupied = [
+                (index % width, index // width)
+                for index, value in enumerate(full_pixels)
+                if value
+            ]
+            xs = [point[0] for point in occupied]
+            ys = [point[1] for point in occupied]
+            box = [
+                min(xs),
+                min(ys),
+                max(xs) + 1 - min(xs),
+                max(ys) + 1 - min(ys),
+            ]
+            coco_pixels = [
+                full_pixels[row * width + column]
+                for column in range(width)
+                for row in range(height)
+            ]
+            counts = []
+            expected = 0
+            count = 0
+            for value in coco_pixels:
+                if value == expected:
+                    count += 1
+                else:
+                    counts.append(count)
+                    count = 1
+                    expected = value
+            counts.append(count)
+            segmentation = {"size": [height, width], "counts": counts}
+            area = sum(full_pixels)
+        elif annotation.annotation_type == "polygon":
             points = geometry["points"]
             xs = [float(point["x"]) * width for point in points]
             ys = [float(point["y"]) * height for point in points]
@@ -72,18 +116,18 @@ def coco_payload(task: AnnotationTask):
                 float(geometry["width"]) * width,
                 float(geometry["height"]) * height,
             ]
-            segmentation = []
+            segmentation = None
             area = box[2] * box[3]
         item = {
-                "id": index,
-                "image_id": image_ids[annotation.frame_id],
-                "category_id": category_ids[annotation.label],
-                "bbox": box,
-                "area": area,
-                "iscrowd": 0,
-                "source": annotation.source,
-            }
-        if segmentation:
+            "id": index,
+            "image_id": image_ids[annotation.frame_id],
+            "category_id": category_ids[annotation.label],
+            "bbox": box,
+            "area": area,
+            "iscrowd": 0,
+            "source": annotation.source,
+        }
+        if segmentation is not None:
             item["segmentation"] = segmentation
         items.append(item)
     return {

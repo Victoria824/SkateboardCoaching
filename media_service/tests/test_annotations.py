@@ -110,3 +110,47 @@ def test_rejects_out_of_bounds_bbox():
                 ]
             }
         )
+
+
+def test_validates_nonempty_pixel_mask_rle():
+    from app.schemas import AnnotationSaveRequest
+
+    request = AnnotationSaveRequest.model_validate(
+        {
+            "annotations": [
+                {
+                    "label": "face",
+                    "annotation_type": "mask",
+                    "geometry": {
+                        "encoding": "row-major-rle-v1",
+                        "width": 8,
+                        "height": 8,
+                        "rle": [18, 4, 4, 4, 4, 4, 26],
+                        "bbox": {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.375},
+                        "edit_count": 2,
+                        "last_edit": "paint",
+                    },
+                }
+            ]
+        }
+    )
+
+    assert request.annotations[0].annotation_type == "mask"
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        AnnotationSaveRequest.model_validate(
+            {
+                "annotations": [
+                    {
+                        "label": "face",
+                        "annotation_type": "mask",
+                        "geometry": {
+                            "encoding": "row-major-rle-v1",
+                            "width": 8,
+                            "height": 8,
+                            "rle": [64],
+                            "bbox": {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.375},
+                        },
+                    }
+                ]
+            }
+        )

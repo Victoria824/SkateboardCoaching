@@ -21,6 +21,10 @@ class Settings:
     ffmpeg_binary: str
     ffprobe_binary: str
     pii_screen_model: str
+    residual_pii_scan_enabled: bool
+    residual_pii_scan_fps: float
+    residual_pii_confidence: float
+    residual_pii_mask_coverage: float
     storage_backend: str
     s3_endpoint_url: str
     s3_public_endpoint_url: str
@@ -31,6 +35,14 @@ class Settings:
     s3_presign_ttl_seconds: int
     s3_presign_get_ttl_seconds: int
     cors_origins: tuple
+
+    def __post_init__(self) -> None:
+        if not 0 < self.residual_pii_scan_fps <= 30:
+            raise ValueError("MEDIA_RESIDUAL_PII_SCAN_FPS must be greater than 0 and at most 30")
+        if not 0 <= self.residual_pii_confidence <= 1:
+            raise ValueError("MEDIA_RESIDUAL_PII_CONFIDENCE must be between 0 and 1")
+        if not 0 <= self.residual_pii_mask_coverage <= 1:
+            raise ValueError("MEDIA_RESIDUAL_PII_MASK_COVERAGE must be between 0 and 1")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -53,6 +65,15 @@ class Settings:
             ffmpeg_binary=os.getenv("FFMPEG_BINARY", "ffmpeg"),
             ffprobe_binary=os.getenv("FFPROBE_BINARY", "ffprobe"),
             pii_screen_model=os.getenv("MEDIA_PII_SCREEN_MODEL", "yolo11n.pt"),
+            residual_pii_scan_enabled=os.getenv("MEDIA_RESIDUAL_PII_SCAN", "true").lower()
+            in {"1", "true", "yes", "on"},
+            residual_pii_scan_fps=float(os.getenv("MEDIA_RESIDUAL_PII_SCAN_FPS", "5")),
+            residual_pii_confidence=float(
+                os.getenv("MEDIA_RESIDUAL_PII_CONFIDENCE", "0.25")
+            ),
+            residual_pii_mask_coverage=float(
+                os.getenv("MEDIA_RESIDUAL_PII_MASK_COVERAGE", "0.8")
+            ),
             storage_backend=os.getenv("MEDIA_STORAGE_BACKEND", "local").lower(),
             s3_endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
             s3_public_endpoint_url=os.getenv("S3_PUBLIC_ENDPOINT_URL", ""),

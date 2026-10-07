@@ -53,7 +53,7 @@ export interface AnnotationRecord {
   task_id: string;
   frame_id: string;
   label: string;
-  annotation_type: 'bbox' | 'keypoints' | 'polygon';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon' | 'mask';
   geometry: Record<string, any>;
   source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
@@ -62,7 +62,7 @@ export interface AnnotationRecord {
 
 export interface AnnotationDraft {
   label: string;
-  annotation_type: 'bbox' | 'keypoints' | 'polygon';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon' | 'mask';
   geometry: Record<string, any>;
   source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
@@ -93,6 +93,9 @@ export interface SanitizedExport {
   processing_ms?: number | null;
   error_code?: string | null;
   error_message?: string | null;
+  residual_scan_status: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'SKIPPED';
+  residual_findings: number;
+  residual_model_version?: string | null;
 }
 
 export interface ModelRun {
@@ -118,7 +121,7 @@ export interface ModelPrediction {
   frame_id: string;
   label: string;
   confidence: number;
-  annotation_type: 'bbox' | 'keypoints' | 'polygon';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon' | 'mask';
   geometry: Record<string, any>;
   track_id?: string | null;
   associated_prediction_id?: string | null;

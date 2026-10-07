@@ -10,6 +10,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Slider,
   Stack,
   TextField,
   Typography,
@@ -25,6 +26,8 @@ import {
   Edit,
   Save,
   ScatterPlot,
+  Brush,
+  RemoveCircleOutline,
 } from '@mui/icons-material';
 
 import {
@@ -53,8 +56,9 @@ import {
   taskExportUrl,
 } from '../mediaApi';
 import { predictionToAnnotation, updatePredictionStatus } from '../annotation/predictionState';
+import { MaskGeometry, bboxToMaskGeometry, maskRuns, paintMaskStroke } from '../annotation/maskState';
 
-type Tool = 'bbox' | 'keypoints';
+type Tool = 'bbox' | 'keypoints' | 'mask-add' | 'mask-erase';
 type LocalAnnotation = AnnotationDraft & { id: string };
 type BBox = { x: number; y: number; width: number; height: number };
 type Point = { name: string; x: number; y: number; visible: boolean };
@@ -63,7 +67,8 @@ type Operation =
   | { kind: 'draw'; startX: number; startY: number }
   | { kind: 'move'; id: string; startX: number; startY: number; original: BBox }
   | { kind: 'resize'; id: string; original: BBox }
-  | { kind: 'point'; id: string; name: string };
+  | { kind: 'point'; id: string; name: string }
+  | { kind: 'mask'; id: string; lastX: number; lastY: number; enabled: boolean };
 
 const KEYPOINTS = [
   'head', 'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
@@ -87,6 +92,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   const [tool, setTool] = useState<Tool>('bbox');
   const [label, setLabel] = useState('rider');
   const [keypointName, setKeypointName] = useState(KEYPOINTS[0]);
+  const [brushRadius, setBrushRadius] = useState(0.025);
   const [operation, setOperation] = useState<Operation | null>(null);
   const [draftBox, setDraftBox] = useState<BBox | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -224,9 +230,32 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setDirty(true);
   };
 
+  const updateMaskStroke = (
+    id: string,
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    enabled: boolean
+  ) => {
+    setAnnotations((items) => items.map((item) => item.id === id
+      ? { ...item, geometry: paintMaskStroke(item.geometry as MaskGeometry, start, end, brushRadius, enabled) }
+      : item));
+    setDirty(true);
+  };
+
   const handleCanvasDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.target !== svgRef.current) return;
     const point = normalizedPoint(event);
+    if (tool === 'mask-add' || tool === 'mask-erase') {
+      if (!selectedAnnotation || selectedAnnotation.annotation_type !== 'mask') {
+        setError('Select an accepted PII mask before using the brush.');
+        return;
+      }
+      const enabled = tool === 'mask-add';
+      updateMaskStroke(selectedAnnotation.id, point, point, enabled);
+      setOperation({ kind: 'mask', id: selectedAnnotation.id, lastX: point.x, lastY: point.y, enabled });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (tool === 'bbox') {
       setOperation({ kind: 'draw', startX: point.x, startY: point.y });
       setDraftBox({ x: point.x, y: point.y, width: 0, height: 0 });
@@ -279,19 +308,28 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
         width: Math.max(0.005, point.x - operation.original.x),
         height: Math.max(0.005, point.y - operation.original.y),
       });
-    } else {
+    } else if (operation.kind === 'point') {
       updatePoint(operation.id, operation.name, point.x, point.y);
+    } else {
+      updateMaskStroke(
+        operation.id,
+        { x: operation.lastX, y: operation.lastY },
+        point,
+        operation.enabled
+      );
+      setOperation({ ...operation, lastX: point.x, lastY: point.y });
     }
   };
 
   const handlePointerUp = () => {
     if (operation?.kind === 'draw' && draftBox && draftBox.width >= 0.005 && draftBox.height >= 0.005) {
       const id = localId();
+      const isPII = ['face', 'license_plate', 'screen'].includes(label);
       setAnnotations((items) => [...items, {
         id,
         label,
-        annotation_type: 'bbox',
-        geometry: draftBox,
+        annotation_type: isPII ? 'mask' : 'bbox',
+        geometry: isPII ? bboxToMaskGeometry(draftBox) : draftBox,
         source: 'human',
       }]);
       setSelectedId(id);
@@ -432,7 +470,12 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
   }, [selectedPrediction, taskId]);
 
   const propagateTrack = async () => {
-    if (!frame || !propagationPrediction?.track_id || propagationPrediction.annotation_type !== 'bbox') return;
+    if (
+      !frame
+      || !propagationPrediction?.track_id
+      || propagationPrediction.annotation_type !== 'bbox'
+      || (selectedAnnotation && selectedAnnotation.annotation_type !== 'bbox')
+    ) return;
     const sourceGeometry = selectedAnnotation?.model_prediction_id === propagationPrediction.id
       ? selectedAnnotation.geometry
       : propagationPrediction.geometry;
@@ -566,7 +609,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: tool === 'bbox' ? 'crosshair' : 'copy', touchAction: 'none' }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: tool === 'bbox' ? 'crosshair' : tool.startsWith('mask') ? 'cell' : 'copy', touchAction: 'none' }}
             >
               {predictions.filter((prediction) => prediction.status === 'PENDING').map((prediction) =>
                 prediction.annotation_type === 'bbox' ? (() => {
@@ -650,6 +693,30 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                     setSelectedPredictionId(null);
                   }}
                 />;
+              })() : annotation.annotation_type === 'mask' ? (() => {
+                const geometry = annotation.geometry as MaskGeometry;
+                const selected = selectedId === annotation.id;
+                return <g key={annotation.id}>
+                  {maskRuns(geometry).map((run, index) => (
+                    <rect
+                      key={`${annotation.id}-mask-${index}`}
+                      x={run.x * 1000} y={run.y * 1000} width={run.width * 1000} height={run.height * 1000}
+                      fill="rgba(239,68,68,.48)" pointerEvents="none"
+                    />
+                  ))}
+                  <rect
+                    x={geometry.bbox.x * 1000} y={geometry.bbox.y * 1000}
+                    width={geometry.bbox.width * 1000} height={geometry.bbox.height * 1000}
+                    fill="transparent" stroke={selected ? '#facc15' : '#ef4444'} strokeWidth={selected ? 6 : 3}
+                    strokeDasharray="10 7" vectorEffect="non-scaling-stroke"
+                    pointerEvents={tool.startsWith('mask') && selected ? 'none' : 'all'}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      setSelectedId(annotation.id);
+                      setSelectedPredictionId(null);
+                    }}
+                  />
+                </g>;
               })() : (annotation.geometry.points as Point[]).map((point) => (
                 <g key={`${annotation.id}-${point.name}`}>
                   <circle
@@ -707,7 +774,9 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
               </Stack>
             </Box>
           )}
-          {propagationPrediction?.track_id && propagationPrediction.annotation_type === 'bbox' && (
+          {propagationPrediction?.track_id
+            && propagationPrediction.annotation_type === 'bbox'
+            && (!selectedAnnotation || selectedAnnotation.annotation_type === 'bbox') && (
             <Box sx={{ p: 1.5, mb: 2, bgcolor: '#eff6ff', borderRadius: 1 }}>
               <Typography variant="subtitle2">Track propagation · #{propagationPrediction.track_id}</Typography>
               <Typography variant="caption" color="text.secondary" display="block" mb={1}>
@@ -741,6 +810,16 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Button fullWidth variant={tool === 'bbox' ? 'contained' : 'outlined'} startIcon={<CropFree />} onClick={() => setTool('bbox')}>Box</Button>
             <Button fullWidth variant={tool === 'keypoints' ? 'contained' : 'outlined'} startIcon={<ScatterPlot />} onClick={() => setTool('keypoints')}>Points</Button>
           </Stack>
+          <Stack direction="row" spacing={1} mb={1}>
+            <Button fullWidth variant={tool === 'mask-add' ? 'contained' : 'outlined'} color="error" startIcon={<Brush />} onClick={() => setTool('mask-add')}>Mask +</Button>
+            <Button fullWidth variant={tool === 'mask-erase' ? 'contained' : 'outlined'} startIcon={<RemoveCircleOutline />} onClick={() => setTool('mask-erase')}>Mask −</Button>
+          </Stack>
+          {tool.startsWith('mask') && (
+            <Box px={1} mb={2}>
+              <Typography variant="caption">Brush radius · {Math.round(brushRadius * 1000) / 10}%</Typography>
+              <Slider min={0.005} max={0.08} step={0.005} value={brushRadius} onChange={(_, value) => setBrushRadius(value as number)} />
+            </Box>
+          )}
           {tool === 'bbox' ? (
             <FormControl fullWidth size="small" sx={{ mb: 2 }}>
               <Select value={label} onChange={(event) => setLabel(event.target.value)}>
@@ -752,13 +831,13 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                 <MenuItem value="screen">PII · Screen</MenuItem>
               </Select>
             </FormControl>
-          ) : (
+          ) : tool === 'keypoints' ? (
             <FormControl fullWidth size="small" sx={{ mb: 2 }}>
               <Select value={keypointName} onChange={(event) => setKeypointName(event.target.value)}>
                 {KEYPOINTS.map((name) => <MenuItem key={name} value={name}>{name.replace(/_/g, ' ')}</MenuItem>)}
               </Select>
             </FormControl>
-          )}
+          ) : null}
           <Stack spacing={1}>
             <Button variant="contained" startIcon={<Save />} disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save frame'}</Button>
             <Button color="error" startIcon={<Delete />} disabled={!selectedId} onClick={deleteSelected}>Delete selected</Button>
@@ -791,6 +870,12 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             )}
             {sanitizedExport?.status === 'COMPLETED' && (
               <Button href={sanitizedBundleUrl(sanitizedExport.id)} target="_blank">Download sanitized bundle</Button>
+            )}
+            {sanitizedExport && sanitizedExport.residual_scan_status !== 'NOT_RUN' && (
+              <Alert severity={sanitizedExport.residual_scan_status === 'PASSED' ? 'success' : sanitizedExport.residual_scan_status === 'SKIPPED' ? 'warning' : 'error'}>
+                Residual PII scan: {sanitizedExport.residual_scan_status.toLowerCase()}
+                {sanitizedExport.residual_findings ? ` · ${sanitizedExport.residual_findings} findings` : ''}
+              </Alert>
             )}
           </Stack>
           <Typography variant="body2" color="text.secondary" mt={2}>

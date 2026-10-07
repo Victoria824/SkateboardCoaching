@@ -76,6 +76,9 @@ class SanitizedExportResponse(BaseModel):
     processing_ms: Optional[int]
     error_code: Optional[str]
     error_message: Optional[str]
+    residual_scan_status: str
+    residual_findings: int
+    residual_model_version: Optional[str]
     created_at: datetime
     completed_at: Optional[datetime]
 
@@ -109,7 +112,7 @@ class DirectUploadResponse(BaseModel):
 
 class AnnotationInput(BaseModel):
     label: str = Field(min_length=1, max_length=100)
-    annotation_type: Literal["bbox", "keypoints", "polygon"]
+    annotation_type: Literal["bbox", "keypoints", "polygon", "mask"]
     geometry: Dict[str, Any]
     source: Literal["human", "model", "model_corrected", "track_propagated"] = "human"
     model_prediction_id: Optional[str] = None
@@ -138,7 +141,7 @@ class AnnotationInput(BaseModel):
                 x, y = point.get("x"), point.get("y")
                 if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not 0 <= x <= 1 or not 0 <= y <= 1:
                     raise ValueError("Keypoint coordinates must be normalized to the image")
-        else:
+        elif self.annotation_type == "polygon":
             points = self.geometry.get("points")
             if not isinstance(points, list) or len(points) < 3:
                 raise ValueError("Polygon geometry requires at least three points")
@@ -155,6 +158,43 @@ class AnnotationInput(BaseModel):
                     or not 0 <= y <= 1
                 ):
                     raise ValueError("Polygon coordinates must be normalized to the image")
+        else:
+            if self.geometry.get("encoding") != "row-major-rle-v1":
+                raise ValueError("Mask geometry requires row-major-rle-v1 encoding")
+            width = self.geometry.get("width")
+            height = self.geometry.get("height")
+            counts = self.geometry.get("rle")
+            if (
+                not isinstance(width, int)
+                or not isinstance(height, int)
+                or not 8 <= width <= 512
+                or not 8 <= height <= 512
+            ):
+                raise ValueError("Mask dimensions must be integers from 8 to 512")
+            if (
+                not isinstance(counts, list)
+                or not counts
+                or any(not isinstance(count, int) or count < 0 for count in counts)
+                or sum(counts) != width * height
+            ):
+                raise ValueError("Mask RLE must exactly cover its declared dimensions")
+            if sum(counts[index] for index in range(1, len(counts), 2)) == 0:
+                raise ValueError("Privacy mask cannot be empty")
+            edit_count = self.geometry.get("edit_count", 0)
+            last_edit = self.geometry.get("last_edit", "proposal")
+            if not isinstance(edit_count, int) or edit_count < 0:
+                raise ValueError("Mask edit_count must be a non-negative integer")
+            if last_edit not in {"proposal", "paint", "erase"}:
+                raise ValueError("Mask last_edit is invalid")
+            bbox = self.geometry.get("bbox")
+            if not isinstance(bbox, dict):
+                raise ValueError("Mask geometry requires its source bbox")
+            AnnotationInput(
+                label=self.label,
+                annotation_type="bbox",
+                geometry=bbox,
+                source=self.source,
+            )
         return self
 
 

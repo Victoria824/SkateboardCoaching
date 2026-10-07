@@ -26,7 +26,12 @@ from .models import (
     SanitizedExport,
     Video,
 )
-from .privacy import build_blur_segments, build_ffmpeg_blur_filter, segment_manifest, sha256_file
+from .privacy import (
+    build_ffmpeg_mask_filter,
+    build_mask_segments,
+    mask_segment_manifest,
+    sha256_file,
+)
 from .quality import route_model_run_reviews
 from .storage import LocalStorage, create_storage
 from .tracking import associate_people_and_boards
@@ -477,6 +482,7 @@ def record_sanitization_failure(
     code: str,
     message: str,
     storage: Optional[LocalStorage] = None,
+    residual_scan: Optional[dict] = None,
 ) -> None:
     session.rollback()
     job = session.get(ProcessingJob, job_id)
@@ -491,6 +497,10 @@ def record_sanitization_failure(
         item.status = "FAILED"
         item.error_code = code
         item.error_message = message[-2000:]
+        if residual_scan:
+            item.residual_scan_status = "FAILED"
+            item.residual_findings = int(residual_scan.get("finding_count", 0))
+            item.residual_model_version = residual_scan.get("model_version")
         storage = storage or create_storage()
         manifest_path = storage.sanitized_manifest_path(item.id)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -499,9 +509,7 @@ def record_sanitization_failure(
             (failed_at - ((job.started_at if job else None) or item.created_at)).total_seconds()
             * 1000
         )
-        manifest_path.write_text(
-            json.dumps(
-                {
+        manifest = {
                     "schema_version": "1.0",
                     "status": "FAILED",
                     "export_id": item.id,
@@ -512,9 +520,11 @@ def record_sanitization_failure(
                     "error_message": message[-2000:],
                     "failed_at": failed_at.isoformat() + "Z",
                     "processing_ms": item.processing_ms,
-                },
-                indent=2,
-            )
+                }
+        if residual_scan:
+            manifest["residual_pii_scan"] = residual_scan
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2)
             + "\n",
             encoding="utf-8",
         )
@@ -522,11 +532,132 @@ def record_sanitization_failure(
     session.commit()
 
 
+def rectangle_union_area(rectangles) -> float:
+    """Exact union area for axis-aligned intersections used by the residual gate."""
+    if not rectangles:
+        return 0.0
+    x_edges = sorted({edge for rectangle in rectangles for edge in (rectangle[0], rectangle[2])})
+    area = 0.0
+    for left, right in zip(x_edges, x_edges[1:]):
+        if right <= left:
+            continue
+        intervals = sorted(
+            (top, bottom)
+            for x1, top, x2, bottom in rectangles
+            if x1 < right and x2 > left and bottom > top
+        )
+        covered_y = 0.0
+        if intervals:
+            current_top, current_bottom = intervals[0]
+            for top, bottom in intervals[1:]:
+                if top > current_bottom:
+                    covered_y += current_bottom - current_top
+                    current_top, current_bottom = top, bottom
+                else:
+                    current_bottom = max(current_bottom, bottom)
+            covered_y += current_bottom - current_top
+        area += (right - left) * covered_y
+    return area
+
+
+def scan_residual_pii(
+    processor: FFmpegProcessor,
+    provider: PredictionProvider,
+    video_path,
+    scan_directory,
+    mask_segments,
+    video_width: int,
+    video_height: int,
+) -> dict:
+    """Fail-closed second-pass PII scan over the rendered artifact."""
+    frames = processor.extract_frames(
+        video_path, scan_directory, settings.residual_pii_scan_fps
+    )
+    if hasattr(provider, "infer_frames"):
+        outputs_by_frame = provider.infer_frames(
+            frames,
+            "pii",
+            settings.residual_pii_confidence,
+            "cpu",
+        )
+    else:
+        outputs_by_frame = [
+            provider.infer_frame(
+                frame,
+                "pii",
+                settings.residual_pii_confidence,
+                "cpu",
+            )
+            for frame in frames
+        ]
+    findings = []
+    covered_redetections = []
+    for frame_index, outputs in enumerate(outputs_by_frame, start=1):
+        timestamp_seconds = (frame_index - 1) / settings.residual_pii_scan_fps
+        for output in outputs:
+            if output.label not in {"face", "license_plate", "screen"}:
+                continue
+            geometry = output.geometry
+            detection = {
+                    "frame_number": frame_index,
+                    "timestamp_ms": round(timestamp_seconds * 1000),
+                    "label": output.label,
+                    "confidence": output.confidence,
+                    "geometry": geometry,
+                    "track_id": (
+                        str(output.external_track_id)
+                        if output.external_track_id is not None
+                        else None
+                    ),
+                }
+            x1 = float(geometry["x"]) * video_width
+            y1 = float(geometry["y"]) * video_height
+            x2 = x1 + float(geometry["width"]) * video_width
+            y2 = y1 + float(geometry["height"]) * video_height
+            detection_area = max(1.0, (x2 - x1) * (y2 - y1))
+            intersections = []
+            for segment in mask_segments:
+                if not segment.start_seconds <= timestamp_seconds <= segment.end_seconds:
+                    continue
+                for rectangle in segment.rectangles:
+                    intersection = (
+                        max(x1, rectangle.x),
+                        max(y1, rectangle.y),
+                        min(x2, rectangle.x + rectangle.width),
+                        min(y2, rectangle.y + rectangle.height),
+                    )
+                    if intersection[2] > intersection[0] and intersection[3] > intersection[1]:
+                        intersections.append(intersection)
+            covered_area = rectangle_union_area(intersections)
+            detection["mask_coverage"] = min(1.0, covered_area / detection_area)
+            if detection["mask_coverage"] >= settings.residual_pii_mask_coverage:
+                covered_redetections.append(detection)
+            else:
+                findings.append(detection)
+    for frame in frames:
+        frame.unlink(missing_ok=True)
+    if scan_directory.exists():
+        scan_directory.rmdir()
+    return {
+        "status": "PASSED" if not findings else "FAILED",
+        "model_version": provider.runtime_version,
+        "sample_fps": settings.residual_pii_scan_fps,
+        "confidence_threshold": settings.residual_pii_confidence,
+        "mask_coverage_threshold": settings.residual_pii_mask_coverage,
+        "scanned_frames": len(frames),
+        "finding_count": len(findings),
+        "findings": findings,
+        "covered_redetection_count": len(covered_redetections),
+        "covered_redetections": covered_redetections,
+    }
+
+
 def process_sanitization_job(
     session: Session,
     job_id: str,
     processor: Optional[FFmpegProcessor] = None,
     storage: Optional[LocalStorage] = None,
+    residual_provider: Optional[PredictionProvider] = None,
 ) -> None:
     processor = processor or FFmpegProcessor()
     storage = storage or create_storage()
@@ -546,7 +677,7 @@ def process_sanitization_job(
             session.scalars(
                 select(Annotation).where(
                     Annotation.task_id == item.task_id,
-                    Annotation.annotation_type == "bbox",
+                    Annotation.annotation_type.in_(("bbox", "mask")),
                     Annotation.label.in_(item.labels),
                 )
             ).all()
@@ -555,8 +686,13 @@ def process_sanitization_job(
             raise MediaProcessingError("NO_PII_REGIONS", "No PII annotations remain for export")
         if not item.video.width or not item.video.height:
             raise MediaProcessingError("MISSING_VIDEO_DIMENSIONS", "Video dimensions are unavailable")
-        segments = build_blur_segments(item.video, annotations)
-        filter_graph, output_label = build_ffmpeg_blur_filter(segments)
+        segments = build_mask_segments(item.video, annotations)
+        filter_graph, output_label = build_ffmpeg_mask_filter(
+            item.video.width,
+            item.video.height,
+            segments,
+            (item.video.duration_ms or 0) / 1000,
+        )
         destination = storage.sanitized_video_path(item.id)
         destination.parent.mkdir(parents=True, exist_ok=True)
         command = [
@@ -591,6 +727,65 @@ def process_sanitization_job(
         ]
         processor._run(command, "SANITIZATION_FAILED")
         job.progress = 90
+        if settings.residual_pii_scan_enabled:
+            scan_directory = destination.parent / "residual-scan"
+            try:
+                residual_provider = residual_provider or OpenCVPIIProvider(
+                    settings.pii_screen_model
+                )
+                residual_scan = scan_residual_pii(
+                    processor,
+                    residual_provider,
+                    destination,
+                    scan_directory,
+                    segments,
+                    item.video.width,
+                    item.video.height,
+                )
+            except Exception as error:
+                for scan_file in (
+                    scan_directory.glob("*") if scan_directory.exists() else []
+                ):
+                    scan_file.unlink(missing_ok=True)
+                if scan_directory.exists():
+                    scan_directory.rmdir()
+                destination.unlink(missing_ok=True)
+                record_sanitization_failure(
+                    session,
+                    job_id,
+                    "RESIDUAL_SCAN_FAILED",
+                    str(error),
+                    storage,
+                    {
+                        "status": "FAILED",
+                        "finding_count": 0,
+                        "error": str(error)[-2000:],
+                    },
+                )
+                return
+            item.residual_scan_status = residual_scan["status"]
+            item.residual_findings = residual_scan["finding_count"]
+            item.residual_model_version = residual_scan["model_version"]
+            if residual_scan["finding_count"]:
+                destination.unlink(missing_ok=True)
+                record_sanitization_failure(
+                    session,
+                    job_id,
+                    "RESIDUAL_PII_DETECTED",
+                    "Residual scan found {} possible PII regions".format(
+                        residual_scan["finding_count"]
+                    ),
+                    storage,
+                    residual_scan,
+                )
+                return
+        else:
+            residual_scan = {
+                "status": "SKIPPED",
+                "finding_count": 0,
+                "reason": "MEDIA_RESIDUAL_PII_SCAN is disabled",
+            }
+            item.residual_scan_status = "SKIPPED"
         output_sha256 = sha256_file(destination)
         manifest_path = storage.sanitized_manifest_path(item.id)
         completed_at = datetime.utcnow()
@@ -633,7 +828,8 @@ def process_sanitization_job(
             "models": list(models.values()),
             "blurred_track_ids": tracks,
             "source_annotation_count": len(annotations),
-            "segments": [segment_manifest(segment) for segment in segments],
+            "segments": [mask_segment_manifest(segment) for segment in segments],
+            "residual_pii_scan": residual_scan,
             "started_at": (job.started_at or item.created_at).isoformat() + "Z",
             "completed_at": completed_at.isoformat() + "Z",
             "processing_ms": processing_ms,

@@ -51,6 +51,9 @@ def export_response(item: SanitizedExport) -> SanitizedExportResponse:
         processing_ms=item.processing_ms,
         error_code=item.error_code,
         error_message=item.error_message,
+        residual_scan_status=item.residual_scan_status,
+        residual_findings=item.residual_findings,
+        residual_model_version=item.residual_model_version,
         created_at=item.created_at,
         completed_at=item.completed_at,
     )
@@ -81,7 +84,7 @@ def create_sanitized_export(
         session.scalars(
             select(Annotation).where(
                 Annotation.task_id == task.id,
-                Annotation.annotation_type == "bbox",
+                Annotation.annotation_type.in_(("bbox", "mask")),
                 Annotation.label.in_(labels),
             )
         ).all()

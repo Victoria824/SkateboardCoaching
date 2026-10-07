@@ -65,6 +65,19 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
                 ]
             },
         )
+        privacy_mask = Annotation(
+            task=task,
+            frame=frame,
+            label="face",
+            annotation_type="mask",
+            geometry={
+                "encoding": "row-major-rle-v1",
+                "width": 8,
+                "height": 8,
+                "rle": [18, 4, 4, 4, 4, 4, 26],
+                "bbox": {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.375},
+            },
+        )
         item = SanitizedExport(
             video=video,
             task=task,
@@ -73,7 +86,7 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
             storage_path="sanitized/export/sanitized.mp4",
             manifest_path="sanitized/export/manifest.json",
         )
-        session.add_all([video, frame, task, annotation, mask, item])
+        session.add_all([video, frame, task, annotation, mask, privacy_mask, item])
         session.commit()
         task_id, export_id = task.id, item.id
     video_path = export_storage.absolute_path("sanitized/export/sanitized.mp4")
@@ -101,6 +114,11 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
     assert coco.json()["annotations"][1]["segmentation"][0][:4] == pytest.approx(
         [128.0, 252.0, 512.0, 252.0]
     )
+    coco_mask = next(
+        item for item in coco.json()["annotations"] if isinstance(item.get("segmentation"), dict)
+    )
+    assert coco_mask["segmentation"]["size"] == [360, 640]
+    assert sum(coco_mask["segmentation"]["counts"]) == 360 * 640
     with zipfile.ZipFile(io.BytesIO(yolo.content)) as archive:
         assert archive.read("classes.txt") == b"face\nsnowboard\n"
         labels = archive.read("labels/1.txt")

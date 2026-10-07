@@ -31,6 +31,7 @@ track coverage, model provenance, dataset hash, and a recall quality gate. Defau
 for faces and 95% for plates and screens. A target is skipped only when the selected split contains
 no gold objects for that class.
 
-Passing this detector gate is necessary but not sufficient for a privacy claim. A later residual-PII
-test must run detection on the rendered sanitized video and require zero reviewer-confirmed residual
-regions.
+Passing this detector gate is necessary but not sufficient for a privacy claim. Sanitized exports
+now run an automated residual-PII scan and fail closed on any finding. Before a production claim,
+measure that scan against a separate reviewer-confirmed residual-video gold set and preferably use
+an independent model so first-pass and second-pass blind spots are not identical.

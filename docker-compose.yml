@@ -62,6 +62,10 @@ services:
       S3_REGION: us-east-1
       MEDIA_CORS_ORIGINS: http://localhost:3000
       MEDIA_FRAME_SAMPLE_FPS: 1
+      MEDIA_RESIDUAL_PII_SCAN: "true"
+      MEDIA_RESIDUAL_PII_SCAN_FPS: 5
+      MEDIA_RESIDUAL_PII_CONFIDENCE: 0.25
+      MEDIA_RESIDUAL_PII_MASK_COVERAGE: 0.8
       MEDIA_QUEUE_BACKEND: celery
       MEDIA_REDIS_URL: redis://redis:6379/0
     depends_on:

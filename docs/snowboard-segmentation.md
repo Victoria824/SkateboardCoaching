@@ -11,5 +11,6 @@ rows. Polygon vertex/brush correction is deliberately not presented as complete:
 supports selection and deletion, while mask correction should be added with zoom, undo, and explicit
 foreground/background brush semantics rather than an unsafe approximation.
 
-This model is for snowboard data labeling, not privacy redaction. PII sanitization continues to blur
-the full reviewer-approved bounding box because under-segmenting a face or plate is a privacy risk.
+This model is for snowboard data labeling, not privacy redaction. PII uses its own conservative RLE
+mask workflow and release-blocking residual scan because under-segmenting a face or plate is a
+privacy risk.

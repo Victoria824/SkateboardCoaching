@@ -54,7 +54,7 @@
                     "properties": {
                       "id": { "type": "string" },
                       "label": { "enum": ["person", "rider", "snowboard", "rider_pose", "face", "license_plate", "screen"] },
-                      "annotation_type": { "enum": ["bbox", "keypoints", "polygon"] },
+                      "annotation_type": { "enum": ["bbox", "keypoints", "polygon", "mask"] },
                       "geometry": { "type": "object" },
                       "track_id": { "type": ["string", "null"] },
                       "associated_object_id": { "type": ["string", "null"] }

@@ -33,3 +33,14 @@ test('correction state updates only the selected prediction', () => {
   expect(updated[1].status).toBe('PENDING');
 });
 
+
+test('PII boxes become editable conservative masks with provenance', () => {
+  const piiPrediction = { ...prediction, label: 'face' };
+  const annotation = predictionToAnnotation(piiPrediction, 'model');
+
+  expect(annotation.annotation_type).toBe('mask');
+  expect(annotation.geometry.encoding).toBe('row-major-rle-v1');
+  expect(annotation.geometry.rle.reduce((sum: number, count: number) => sum + count, 0)).toBe(128 * 128);
+  expect(annotation.geometry.bbox).toEqual(piiPrediction.geometry);
+  expect(annotation.model_prediction_id).toBe(piiPrediction.id);
+});
