@@ -38,12 +38,23 @@ tracks, automatic approval reviews, a completed-task export gate, reviewer/model
 COCO and YOLO exports, sanitized bundles, request IDs, operational metrics, two-worker Compose, an
 ONNX comparison harness, and GitHub Actions CI.
 
+Milestone 6A adds PII gold quality gates, difficult-case and track-coverage metrics, private
+S3/MinIO storage, browser-to-object-store signed uploads, checksum verification, signed downloads,
+recoverable worker leases, and transactional-outbox Redis/Celery delivery. See
+[PII gold evaluation](docs/pii-gold-evaluation.md), [object storage](docs/object-storage.md), and
+[distributed queue delivery](docs/distributed-queue.md).
+
+Milestone 6B adds YOLO snowboard instance-segmentation proposals, polygon acceptance/rejection in
+the reviewer, temporal polygon identities, and COCO/YOLO segmentation export. PII sanitization
+continues to use conservative reviewed boxes until mask-specific gold evidence and brush editing are
+available; this boundary is documented in [production readiness](docs/production-readiness.md).
+
 ## ✨ Features
 
 - **Primary data platform**: FastAPI, PostgreSQL/SQLite, workers, FFmpeg, local Ultralytics/OpenCV
 - **Human-in-the-loop review**: versioned predictions, tracking, correction propagation, gold metrics
 - **Privacy pipeline**: face/plate/screen proposals, reviewer approval, sanitized video and audit manifest
-- **Dataset delivery**: Gold JSON, COCO JSON, YOLO bundle, and sanitized bundle
+- **Dataset delivery**: Gold JSON, COCO JSON, YOLO detection/segmentation bundle, and sanitized bundle
 - **Legacy coaching demo**: Replicate LLaVA/LLaMA consumes images and produces narrative coaching
 - **Real-time Chat**: Interactive chatbot for personalized coaching advice
 - **Technical Analysis**: Detailed feedback on:
@@ -120,7 +131,8 @@ cd media_service
 .venv/bin/python -m app.worker
 ```
 
-Alternatively, `docker compose up --build` starts the API, worker, and PostgreSQL together.
+Alternatively, `docker compose up --build` starts the API, migrations, PostgreSQL, private MinIO,
+Redis, the outbox dispatcher, and two Celery media workers together.
 
 ## 🛠️ Technology Stack
 

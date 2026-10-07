@@ -132,7 +132,11 @@ def route_model_run_reviews(
             created += _add_review(
                 session, model_run, prediction, "EDGE_CLIPPED", "HIGH", details={"margin": 0.01}
             )
-        if prediction.label == "snowboard" and prediction.associated_prediction_id is None:
+        if (
+            model_run.model_kind == "detection"
+            and prediction.label == "snowboard"
+            and prediction.associated_prediction_id is None
+        ):
             created += _add_review(
                 session,
                 model_run,
@@ -286,11 +290,12 @@ def annotation_agreement(annotations: Iterable[Annotation]) -> Dict[str, Any]:
                 scored_pairs = []
                 for first_index, first in enumerate(first_candidates):
                     for second_index, second in enumerate(second_candidates):
-                        score = (
-                            bbox_iou(first.geometry, second.geometry)
-                            if annotation_type == "bbox"
-                            else keypoint_pck(first.geometry, second.geometry)
-                        )
+                        if annotation_type == "bbox":
+                            score = bbox_iou(first.geometry, second.geometry)
+                        elif annotation_type == "keypoints":
+                            score = keypoint_pck(first.geometry, second.geometry)
+                        else:
+                            score = None
                         if score is not None:
                             scored_pairs.append((score, first_index, second_index))
                 used_first = set()

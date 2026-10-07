@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_session
 from ..models import (
     Annotation,
@@ -27,9 +26,11 @@ from ..schemas import (
     ReviewItemResponse,
     ReviewResolveRequest,
 )
+from ..storage import create_storage
 
 
 router = APIRouter(prefix="/api", tags=["quality and review"])
+storage = create_storage()
 
 
 def _review_response(session: Session, item: ReviewItem) -> ReviewItemResponse:
@@ -59,7 +60,7 @@ def _review_response(session: Session, item: ReviewItem) -> ReviewItemResponse:
         details=item.details,
         frame_number=item.frame.frame_number,
         timestamp_ms=item.frame.timestamp_ms,
-        image_url="{}/{}".format(settings.public_media_url, item.frame.storage_path),
+        image_url=storage.public_url(item.frame.storage_path),
         prediction_label=item.prediction.label if item.prediction else None,
         prediction_confidence=item.prediction.confidence if item.prediction else None,
         prediction_track_id=item.prediction.track_id if item.prediction else None,

@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 
 from ..database import get_session
 from ..models import Annotation, AnnotationTask, SanitizedExport
-from ..storage import LocalStorage
+from ..storage import create_storage
 
 
 router = APIRouter(prefix="/api", tags=["dataset exports"])
-storage = LocalStorage()
+storage = create_storage()
 
 
 def _task(task_id: str, session: Session) -> AnnotationTask:
@@ -27,7 +27,9 @@ def _task(task_id: str, session: Session) -> AnnotationTask:
 
 
 def coco_payload(task: AnnotationTask):
-    annotations = [item for item in task.annotations if item.annotation_type == "bbox"]
+    annotations = [
+        item for item in task.annotations if item.annotation_type in {"bbox", "polygon"}
+    ]
     labels = sorted({item.label for item in annotations})
     category_ids = {label: index + 1 for index, label in enumerate(labels)}
     images = []
@@ -50,23 +52,40 @@ def coco_payload(task: AnnotationTask):
         if not width or not height:
             raise HTTPException(status_code=409, detail="Frame dimensions are required for export")
         geometry = annotation.geometry
-        box = [
-            float(geometry["x"]) * width,
-            float(geometry["y"]) * height,
-            float(geometry["width"]) * width,
-            float(geometry["height"]) * height,
-        ]
-        items.append(
-            {
+        if annotation.annotation_type == "polygon":
+            points = geometry["points"]
+            xs = [float(point["x"]) * width for point in points]
+            ys = [float(point["y"]) * height for point in points]
+            box = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+            segmentation = [[coordinate for point in zip(xs, ys) for coordinate in point]]
+            area = abs(
+                sum(
+                    xs[index] * ys[(index + 1) % len(points)]
+                    - xs[(index + 1) % len(points)] * ys[index]
+                    for index in range(len(points))
+                )
+            ) / 2
+        else:
+            box = [
+                float(geometry["x"]) * width,
+                float(geometry["y"]) * height,
+                float(geometry["width"]) * width,
+                float(geometry["height"]) * height,
+            ]
+            segmentation = []
+            area = box[2] * box[3]
+        item = {
                 "id": index,
                 "image_id": image_ids[annotation.frame_id],
                 "category_id": category_ids[annotation.label],
                 "bbox": box,
-                "area": box[2] * box[3],
+                "area": area,
                 "iscrowd": 0,
                 "source": annotation.source,
             }
-        )
+        if segmentation:
+            item["segmentation"] = segmentation
+        items.append(item)
     return {
         "info": {"schema_version": "1.0", "task_id": task.id, "video_id": task.video_id},
         "images": images,
@@ -85,21 +104,29 @@ def export_coco(task_id: str, session: Session = Depends(get_session)):
 @router.get("/annotation-tasks/{task_id}/exports/yolo")
 def export_yolo(task_id: str, session: Session = Depends(get_session)):
     task = _task(task_id, session)
-    annotations = [item for item in task.annotations if item.annotation_type == "bbox"]
+    annotations = [
+        item for item in task.annotations if item.annotation_type in {"bbox", "polygon"}
+    ]
     labels = sorted({item.label for item in annotations})
     label_ids = {label: index for index, label in enumerate(labels)}
     grouped = {}
     for annotation in annotations:
         geometry = annotation.geometry
-        grouped.setdefault(annotation.frame_id, []).append(
-            "{} {:.6f} {:.6f} {:.6f} {:.6f}".format(
+        if annotation.annotation_type == "polygon":
+            coordinates = " ".join(
+                "{:.6f} {:.6f}".format(float(point["x"]), float(point["y"]))
+                for point in geometry["points"]
+            )
+            line = "{} {}".format(label_ids[annotation.label], coordinates)
+        else:
+            line = "{} {:.6f} {:.6f} {:.6f} {:.6f}".format(
                 label_ids[annotation.label],
                 float(geometry["x"]) + float(geometry["width"]) / 2,
                 float(geometry["y"]) + float(geometry["height"]) / 2,
                 float(geometry["width"]),
                 float(geometry["height"]),
             )
-        )
+        grouped.setdefault(annotation.frame_id, []).append(line)
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("classes.txt", "\n".join(labels) + "\n")

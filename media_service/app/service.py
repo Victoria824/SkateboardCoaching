@@ -1,9 +1,10 @@
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import List, Optional, Sequence
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -15,14 +16,64 @@ from .inference import (
     UltralyticsProvider,
 )
 from .media import FFmpegProcessor, MediaProcessingError
-from .models import Annotation, Frame, ModelPrediction, ModelRun, ProcessingJob, SanitizedExport, Video
+from .models import (
+    Annotation,
+    Frame,
+    JobOutbox,
+    ModelPrediction,
+    ModelRun,
+    ProcessingJob,
+    SanitizedExport,
+    Video,
+)
 from .privacy import build_blur_segments, build_ffmpeg_blur_filter, segment_manifest, sha256_file
 from .quality import route_model_run_reviews
-from .storage import LocalStorage
+from .storage import LocalStorage, create_storage
 from .tracking import associate_people_and_boards
 
 
 logger = logging.getLogger(__name__)
+ACTIVE_JOB_STATES = {
+    "PROCESSING_VIDEO",
+    "EXTRACTING_FRAMES",
+    "RUNNING_INFERENCE",
+    "SANITIZING_VIDEO",
+}
+
+
+def renew_job_lease(job: ProcessingJob) -> None:
+    now = datetime.utcnow()
+    job.heartbeat_at = now
+    job.lease_expires_at = now + timedelta(seconds=settings.worker_lease_seconds)
+
+
+def requeue_job_outbox(session: Session, job: ProcessingJob) -> None:
+    """Make a retry visible to the Celery dispatcher without creating duplicate rows."""
+    outbox = session.scalar(select(JobOutbox).where(JobOutbox.job_id == job.id))
+    if outbox is None:
+        outbox = JobOutbox(job_id=job.id)
+        session.add(outbox)
+    else:
+        outbox.status = "PENDING"
+        outbox.published_at = None
+        outbox.last_error = None
+
+
+def mark_expired_job_failed(job: ProcessingJob) -> None:
+    job.state = "FAILED"
+    job.error_code = "WORKER_LEASE_EXPIRED"
+    job.error_message = "Worker lease expired after maximum attempts"
+    job.lease_expires_at = None
+    if job.job_type == "VIDEO_INGESTION":
+        job.video.status = "PROCESSING_FAILED"
+    if job.model_run:
+        job.model_run.status = "FAILED"
+        job.model_run.error_code = job.error_code
+        job.model_run.error_message = job.error_message
+    if job.sanitized_export:
+        job.sanitized_export.status = "FAILED"
+        job.sanitized_export.error_code = job.error_code
+        job.sanitized_export.error_message = job.error_message
 
 
 def record_failure(session: Session, job_id: str, code: str, message: str) -> None:
@@ -34,15 +85,45 @@ def record_failure(session: Session, job_id: str, code: str, message: str) -> No
         job.error_message = message[-2000:]
         job.state = "RETRY_PENDING" if job.attempts < job.max_attempts else "FAILED"
         job.progress = 0
+        job.lease_expires_at = None
     if video:
         video.status = "PROCESSING_FAILED"
+    if job and job.state == "RETRY_PENDING":
+        requeue_job_outbox(session, job)
     session.commit()
 
 
-def claim_next_job(session: Session) -> Optional[str]:
+def claim_next_job(session: Session, worker_id: Optional[str] = None) -> Optional[str]:
+    now = datetime.utcnow()
+    worker_id = worker_id or "pid-{}".format(os.getpid())
+    stale_lease = or_(
+        ProcessingJob.lease_expires_at.is_(None), ProcessingJob.lease_expires_at < now
+    )
+    exhausted = list(
+        session.scalars(
+            select(ProcessingJob).where(
+                ProcessingJob.state.in_(ACTIVE_JOB_STATES),
+                stale_lease,
+                ProcessingJob.attempts >= ProcessingJob.max_attempts,
+            )
+        ).all()
+    )
+    for job in exhausted:
+        mark_expired_job_failed(job)
+    if exhausted:
+        session.commit()
     candidate = session.scalar(
         select(ProcessingJob)
-        .where(ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")))
+        .where(
+            or_(
+                ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")),
+                and_(
+                    ProcessingJob.state.in_(ACTIVE_JOB_STATES),
+                    stale_lease,
+                    ProcessingJob.attempts < ProcessingJob.max_attempts,
+                ),
+            )
+        )
         .order_by(ProcessingJob.created_at)
         .limit(1)
     )
@@ -57,7 +138,13 @@ def claim_next_job(session: Session) -> Optional[str]:
         update(ProcessingJob)
         .where(
             ProcessingJob.id == candidate.id,
-            ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")),
+            or_(
+                ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")),
+                and_(
+                    ProcessingJob.state.in_(ACTIVE_JOB_STATES),
+                    stale_lease,
+                ),
+            ),
         )
         .values(
             state=claimed_state,
@@ -66,10 +153,70 @@ def claim_next_job(session: Session) -> Optional[str]:
             started_at=datetime.utcnow(),
             error_code=None,
             error_message=None,
+            worker_id=worker_id,
+            heartbeat_at=now,
+            lease_expires_at=now + timedelta(seconds=settings.worker_lease_seconds),
         )
     )
     session.commit()
     return candidate.id if result.rowcount == 1 else None
+
+
+def claim_job_by_id(session: Session, job_id: str, worker_id: str) -> Optional[str]:
+    """Idempotently claim the exact job named by an at-least-once queue message."""
+    now = datetime.utcnow()
+    stale_lease = or_(
+        ProcessingJob.lease_expires_at.is_(None), ProcessingJob.lease_expires_at < now
+    )
+    candidate = session.get(ProcessingJob, job_id)
+    if candidate is None:
+        return None
+    if candidate.attempts >= candidate.max_attempts:
+        if candidate.state in ACTIVE_JOB_STATES and (
+            candidate.lease_expires_at is None or candidate.lease_expires_at < now
+        ):
+            mark_expired_job_failed(candidate)
+            session.commit()
+        return None
+    claimed_state = {
+        "MODEL_INFERENCE": "RUNNING_INFERENCE",
+        "PII_SANITIZATION": "SANITIZING_VIDEO",
+    }.get(candidate.job_type, "PROCESSING_VIDEO")
+    result = session.execute(
+        update(ProcessingJob)
+        .where(
+            ProcessingJob.id == job_id,
+            or_(
+                ProcessingJob.state.in_(("QUEUED", "RETRY_PENDING")),
+                and_(ProcessingJob.state.in_(ACTIVE_JOB_STATES), stale_lease),
+            ),
+        )
+        .values(
+            state=claimed_state,
+            progress=5,
+            attempts=ProcessingJob.attempts + 1,
+            started_at=now,
+            error_code=None,
+            error_message=None,
+            worker_id=worker_id,
+            heartbeat_at=now,
+            lease_expires_at=now + timedelta(seconds=settings.worker_lease_seconds),
+        )
+    )
+    session.commit()
+    return job_id if result.rowcount == 1 else None
+
+
+def process_claimed_job(session: Session, job_id: str) -> None:
+    job = session.get(ProcessingJob, job_id)
+    if job is None:
+        return
+    if job.job_type == "MODEL_INFERENCE":
+        process_inference_job(session, job_id)
+    elif job.job_type == "PII_SANITIZATION":
+        process_sanitization_job(session, job_id)
+    else:
+        process_job(session, job_id)
 
 
 def process_job(
@@ -79,7 +226,7 @@ def process_job(
     storage: Optional[LocalStorage] = None,
 ) -> None:
     processor = processor or FFmpegProcessor()
-    storage = storage or LocalStorage()
+    storage = storage or create_storage()
     job = session.get(ProcessingJob, job_id)
     if job is None:
         raise ValueError("Unknown job {}".format(job_id))
@@ -91,9 +238,14 @@ def process_job(
         video.status = "PROCESSING_VIDEO"
         job.state = "PROCESSING_VIDEO"
         job.progress = 10
+        renew_job_lease(job)
         session.commit()
 
         source = storage.absolute_path(video.storage_path)
+        if video.source_sha256 and sha256_file(source) != video.source_sha256:
+            raise MediaProcessingError(
+                "SOURCE_CHECKSUM_MISMATCH", "Materialized source does not match upload checksum"
+            )
         metadata = processor.probe(source)
         video.duration_ms = metadata.duration_ms
         video.fps = metadata.fps
@@ -103,6 +255,7 @@ def process_job(
         video.source_frame_count = metadata.frame_count
         job.state = "EXTRACTING_FRAMES"
         job.progress = 35
+        renew_job_lease(job)
         session.commit()
 
         frame_dir = storage.frame_directory(video.id)
@@ -125,7 +278,7 @@ def process_job(
                     video_id=video.id,
                     frame_number=index,
                     timestamp_ms=timestamp_ms,
-                    storage_path=storage.relative_path(frame_path),
+                    storage_path=storage.persist(frame_path, "image/jpeg"),
                     width=metadata.width,
                     height=metadata.height,
                 )
@@ -135,6 +288,7 @@ def process_job(
         job.state = "READY_FOR_ANNOTATION"
         job.progress = 100
         job.completed_at = datetime.utcnow()
+        job.lease_expires_at = None
         session.commit()
         logger.info("Processed video", extra={"video_id": video.id, "job_id": job.id})
     except MediaProcessingError as error:
@@ -154,10 +308,13 @@ def record_inference_failure(session: Session, job_id: str, code: str, message: 
         job.error_message = message[-2000:]
         job.state = "RETRY_PENDING" if job.attempts < job.max_attempts else "FAILED"
         job.progress = 0
+        job.lease_expires_at = None
     if model_run:
         model_run.status = "RETRY_PENDING" if job and job.state == "RETRY_PENDING" else "FAILED"
         model_run.error_code = code
         model_run.error_message = message[-2000:]
+    if job and job.state == "RETRY_PENDING":
+        requeue_job_outbox(session, job)
     session.commit()
 
 
@@ -211,7 +368,7 @@ def process_inference_job(
     provider: Optional[PredictionProvider] = None,
     storage: Optional[LocalStorage] = None,
 ) -> None:
-    storage = storage or LocalStorage()
+    storage = storage or create_storage()
     job = session.get(ProcessingJob, job_id)
     if job is None or job.model_run_id is None:
         raise ValueError("Inference job is missing its model run")
@@ -233,6 +390,7 @@ def process_inference_job(
         model_run.error_message = None
         job.state = "RUNNING_INFERENCE"
         job.progress = 5
+        renew_job_lease(job)
         session.execute(delete(ModelPrediction).where(ModelPrediction.model_run_id == model_run.id))
         session.commit()
 
@@ -277,6 +435,7 @@ def process_inference_job(
             )
             model_run.processed_frames = index
             job.progress = 5 + round((index / max(1, len(frames))) * 90)
+            renew_job_lease(job)
             session.commit()
 
         rider_track_ids = {
@@ -301,6 +460,7 @@ def process_inference_job(
         job.state = "COMPLETED"
         job.progress = 100
         job.completed_at = completed_at
+        job.lease_expires_at = None
         route_model_run_reviews(session, model_run)
         session.commit()
     except InferenceError as error:
@@ -326,11 +486,12 @@ def record_sanitization_failure(
         job.error_code = code
         job.error_message = message[-2000:]
         job.progress = 0
+        job.lease_expires_at = None
     if item:
         item.status = "FAILED"
         item.error_code = code
         item.error_message = message[-2000:]
-        storage = storage or LocalStorage()
+        storage = storage or create_storage()
         manifest_path = storage.sanitized_manifest_path(item.id)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         failed_at = datetime.utcnow()
@@ -357,7 +518,7 @@ def record_sanitization_failure(
             + "\n",
             encoding="utf-8",
         )
-        item.manifest_path = storage.relative_path(manifest_path)
+        item.manifest_path = storage.persist(manifest_path, "application/json")
     session.commit()
 
 
@@ -368,7 +529,7 @@ def process_sanitization_job(
     storage: Optional[LocalStorage] = None,
 ) -> None:
     processor = processor or FFmpegProcessor()
-    storage = storage or LocalStorage()
+    storage = storage or create_storage()
     job = session.get(ProcessingJob, job_id)
     if job is None or job.sanitized_export_id is None:
         raise ValueError("Sanitization job is missing its export")
@@ -379,6 +540,7 @@ def process_sanitization_job(
         item.status = "RUNNING"
         job.state = "SANITIZING_VIDEO"
         job.progress = 10
+        renew_job_lease(job)
         session.commit()
         annotations = list(
             session.scalars(
@@ -477,8 +639,8 @@ def process_sanitization_job(
             "processing_ms": processing_ms,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        item.storage_path = storage.relative_path(destination)
-        item.manifest_path = storage.relative_path(manifest_path)
+        item.storage_path = storage.persist(destination, "video/mp4")
+        item.manifest_path = storage.persist(manifest_path, "application/json")
         item.output_sha256 = output_sha256
         item.source_annotation_count = len(annotations)
         item.processing_ms = processing_ms
@@ -487,6 +649,7 @@ def process_sanitization_job(
         job.state = "COMPLETED"
         job.progress = 100
         job.completed_at = completed_at
+        job.lease_expires_at = None
         session.commit()
     except MediaProcessingError as error:
         record_sanitization_failure(session, job_id, error.code, str(error), storage)

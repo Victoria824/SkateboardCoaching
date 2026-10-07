@@ -32,6 +32,7 @@
             }
           },
           "sampling_profile": { "enum": ["overview", "action", "motion", "custom"] },
+          "split": { "enum": ["train", "validation", "test"] },
           "sample_fps": { "type": "number", "minimum": 0.1, "maximum": 30 },
           "frames": {
             "type": "array",
@@ -52,8 +53,8 @@
                     "required": ["id", "label", "annotation_type", "geometry"],
                     "properties": {
                       "id": { "type": "string" },
-                      "label": { "enum": ["person", "rider", "snowboard", "rider_pose"] },
-                      "annotation_type": { "enum": ["bbox", "keypoints"] },
+                      "label": { "enum": ["person", "rider", "snowboard", "rider_pose", "face", "license_plate", "screen"] },
+                      "annotation_type": { "enum": ["bbox", "keypoints", "polygon"] },
                       "geometry": { "type": "object" },
                       "track_id": { "type": ["string", "null"] },
                       "associated_object_id": { "type": ["string", "null"] }

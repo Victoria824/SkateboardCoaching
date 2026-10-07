@@ -53,7 +53,7 @@ export interface AnnotationRecord {
   task_id: string;
   frame_id: string;
   label: string;
-  annotation_type: 'bbox' | 'keypoints';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon';
   geometry: Record<string, any>;
   source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
@@ -62,7 +62,7 @@ export interface AnnotationRecord {
 
 export interface AnnotationDraft {
   label: string;
-  annotation_type: 'bbox' | 'keypoints';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon';
   geometry: Record<string, any>;
   source: 'human' | 'model' | 'model_corrected' | 'track_propagated';
   model_prediction_id?: string | null;
@@ -98,7 +98,7 @@ export interface SanitizedExport {
 export interface ModelRun {
   id: string;
   video_id: string;
-  model_kind: 'detection' | 'pose' | 'pii';
+  model_kind: 'detection' | 'pose' | 'pii' | 'segmentation';
   provider: string;
   model_name: string;
   model_version: string;
@@ -118,7 +118,7 @@ export interface ModelPrediction {
   frame_id: string;
   label: string;
   confidence: number;
-  annotation_type: 'bbox' | 'keypoints';
+  annotation_type: 'bbox' | 'keypoints' | 'polygon';
   geometry: Record<string, any>;
   track_id?: string | null;
   associated_prediction_id?: string | null;
@@ -216,6 +216,40 @@ export async function ingestVideo(
   file: File,
   samplingProfile: 'overview' | 'action' | 'motion' = 'overview'
 ): Promise<UploadResult> {
+  if (process.env.REACT_APP_DIRECT_UPLOADS === 'true') {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    const sha256 = Array.from(new Uint8Array(digest))
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
+    const initiated = await parseResponse<{
+      upload_id: string;
+      upload_url: string;
+      required_headers: Record<string, string>;
+    }>(
+      await fetch(`${MEDIA_API_BASE_URL}/api/direct-uploads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || 'video/mp4',
+          size_bytes: file.size,
+          sha256,
+          sampling_profile: samplingProfile,
+        }),
+      })
+    );
+    const uploaded = await fetch(initiated.upload_url, {
+      method: 'PUT',
+      headers: initiated.required_headers,
+      body: file,
+    });
+    if (!uploaded.ok) throw new Error(`Object upload failed with status ${uploaded.status}`);
+    return parseResponse<UploadResult>(
+      await fetch(`${MEDIA_API_BASE_URL}/api/direct-uploads/${initiated.upload_id}/complete`, {
+        method: 'POST',
+      })
+    );
+  }
   const formData = new FormData();
   formData.append('video', file);
   formData.append('sampling_profile', samplingProfile);
@@ -310,7 +344,7 @@ export const taskExportUrl = (taskId: string, format: 'coco' | 'yolo') =>
 
 export async function createModelRun(
   videoId: string,
-  modelKind: 'detection' | 'pose' | 'pii'
+  modelKind: 'detection' | 'pose' | 'pii' | 'segmentation'
 ): Promise<{ model_run: ModelRun; job: ProcessingJob }> {
   return parseResponse<{ model_run: ModelRun; job: ProcessingJob }>(
     await fetch(`${MEDIA_API_BASE_URL}/api/videos/${videoId}/model-runs`, {

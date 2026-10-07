@@ -4,3 +4,5 @@ uvicorn[standard]==0.34.2
 sqlalchemy==2.0.40
 psycopg[binary]==3.2.6
 python-multipart==0.0.20
+boto3==1.40.45
+celery[redis]==5.5.3

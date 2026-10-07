@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -24,6 +24,7 @@ class Video(Base):
     storage_path: Mapped[str] = mapped_column(Text, unique=True)
     mime_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     file_size: Mapped[int] = mapped_column(Integer)
+    source_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     fps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -54,6 +55,28 @@ class Video(Base):
     sanitized_exports: Mapped[List["SanitizedExport"]] = relationship(
         back_populates="video", cascade="all, delete-orphan"
     )
+
+
+class DirectUpload(Base):
+    __tablename__ = "direct_uploads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    object_key: Mapped[str] = mapped_column(Text, unique=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(100))
+    expected_size: Mapped[int] = mapped_column(Integer)
+    expected_sha256: Mapped[str] = mapped_column(String(64))
+    sampling_profile: Mapped[str] = mapped_column(String(50), default="overview")
+    sample_fps: Mapped[float] = mapped_column(Float, default=1.0)
+    status: Mapped[str] = mapped_column(String(30), default="INITIATED", index=True)
+    video_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("videos.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    video: Mapped[Optional[Video]] = relationship()
 
 
 class Frame(Base):
@@ -103,11 +126,41 @@ class ProcessingJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    worker_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     video: Mapped[Video] = relationship(back_populates="jobs")
     model_run: Mapped[Optional["ModelRun"]] = relationship(back_populates="job")
     sanitized_export: Mapped[Optional["SanitizedExport"]] = relationship(back_populates="job")
+
+
+class JobOutbox(Base):
+    __tablename__ = "job_outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+@event.listens_for(ProcessingJob, "after_insert")
+def create_job_outbox(_, connection, target) -> None:
+    connection.execute(
+        JobOutbox.__table__.insert().values(
+            id=new_id(),
+            job_id=target.id,
+            status="PENDING",
+            attempts=0,
+            created_at=utcnow(),
+        )
+    )
 
 
 class SanitizedExport(Base):

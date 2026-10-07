@@ -28,6 +28,15 @@ Node/Replicate coaching adapter consumes completed review output downstream.
 - Completed tasks export to COCO JSON or a YOLO image/label bundle.
 - Every HTTP response carries `X-Request-ID`; `/api/operations/metrics` reports failure rate and
   per-job-type duration. Docker Compose starts two atomically claiming workers.
+- Optional S3/MinIO mode provides signed direct uploads/downloads, local worker staging, persisted
+  artifacts, and two-stage checksum verification. Worker leases recover jobs abandoned by a dead
+  process after a bounded timeout.
+- PII gold evaluation reports recall-weighted F2, difficult-case slices, false negatives per minute,
+  uncovered-frame rate, temporal track coverage, and release-gating failures.
+- A transactional job outbox publishes to Redis/Celery in deployed mode. Late-ack workers must win
+  the same atomic database claim and lease used by the local polling worker, making duplicates safe.
+- YOLO segmentation runs persist tracked snowboard polygons. Reviewers can accept/reject masks and
+  export them in COCO or Ultralytics YOLO segmentation format.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -111,6 +120,15 @@ docker compose up --build
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MEDIA_DATABASE_URL` | local SQLite file | SQLAlchemy database URL |
+| `MEDIA_STORAGE_BACKEND` | `local` | `local` or S3-compatible `s3` |
+| `MEDIA_WORKER_LEASE_SECONDS` | `1800` | Time before another worker may reclaim an abandoned job |
+| `MEDIA_QUEUE_BACKEND` | `database` | Local polling or deployed `celery` delivery |
+| `MEDIA_REDIS_URL` | `redis://localhost:6379/0` | Celery broker URL |
+| `S3_ENDPOINT_URL` | AWS default | MinIO/S3-compatible endpoint override |
+| `S3_PUBLIC_ENDPOINT_URL` | internal endpoint | Browser-reachable endpoint used for signing URLs |
+| `S3_BUCKET` | `snowboard-media` | Private media bucket |
+| `S3_PRESIGN_TTL_SECONDS` | `900` | Direct-upload URL lifetime |
+| `S3_PRESIGN_GET_TTL_SECONDS` | `3600` | Media download URL lifetime |
 | `MEDIA_STORAGE_ROOT` | `media_service/data/media` | Local object-storage root |
 | `MEDIA_MAX_UPLOAD_BYTES` | 250 MiB | Upload limit |
 | `MEDIA_FRAME_SAMPLE_FPS` | `1` | Legacy fallback when a stored video has no sample rate |

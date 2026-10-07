@@ -78,6 +78,8 @@ class UltralyticsProvider:
             raise InferenceError("INFERENCE_FAILED", str(error)) from error
         if model_kind == "pose":
             return self._pose_outputs(result)
+        if model_kind == "segmentation":
+            return self._segmentation_outputs(result)
         return self._detection_outputs(result)
 
     def infer_frames(
@@ -101,11 +103,13 @@ class UltralyticsProvider:
                 )[0]
             except Exception as error:
                 raise InferenceError("INFERENCE_FAILED", str(error)) from error
-            sequence.append(
-                self._pose_outputs(result)
-                if model_kind == "pose"
-                else self._detection_outputs(result)
-            )
+            if model_kind == "pose":
+                outputs = self._pose_outputs(result)
+            elif model_kind == "segmentation":
+                outputs = self._segmentation_outputs(result)
+            else:
+                outputs = self._detection_outputs(result)
+            sequence.append(outputs)
         return self._fill_missing_track_ids(sequence)
 
     @staticmethod
@@ -271,6 +275,42 @@ class UltralyticsProvider:
                         external_track_id=track_id,
                     )
                 )
+        return outputs
+
+    @staticmethod
+    def _segmentation_outputs(result) -> List[PredictionOutput]:
+        """Return normalized snowboard instance polygons from an Ultralytics seg result."""
+        outputs: List[PredictionOutput] = []
+        if result.boxes is None or result.masks is None or result.masks.xyn is None:
+            return outputs
+        polygons = result.masks.xyn
+        classes = result.boxes.cls.cpu().tolist()
+        confidences = result.boxes.conf.cpu().tolist()
+        track_ids = UltralyticsProvider._track_ids(result, len(polygons))
+        for polygon, class_id, confidence, track_id in zip(
+            polygons, classes, confidences, track_ids
+        ):
+            if str(result.names[int(class_id)]) != "snowboard":
+                continue
+            raw_points = polygon.tolist() if hasattr(polygon, "tolist") else polygon
+            points = [
+                {
+                    "x": min(1.0, max(0.0, float(point[0]))),
+                    "y": min(1.0, max(0.0, float(point[1]))),
+                }
+                for point in raw_points
+            ]
+            if len(points) < 3:
+                continue
+            outputs.append(
+                PredictionOutput(
+                    label="snowboard",
+                    confidence=float(confidence),
+                    annotation_type="polygon",
+                    geometry={"points": points},
+                    external_track_id=track_id,
+                )
+            )
         return outputs
 
 

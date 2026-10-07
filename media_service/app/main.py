@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from .api.inference import router as inference_router
 from .api.exports import router as exports_router
 from .api.operations import router as operations_router
+from .api.uploads import router as uploads_router
 from .api.quality import router as quality_router
 from .api.privacy import router as privacy_router
 from .config import settings
@@ -26,6 +27,7 @@ from .models import (
     AnnotationPropagation,
     AnnotationTask,
     Frame,
+    JobOutbox,
     ModelPrediction,
     PredictionDecision,
     ProcessingJob,
@@ -42,11 +44,11 @@ from .schemas import (
     UploadResponse,
     VideoResponse,
 )
-from .storage import LocalStorage, UploadTooLarge, safe_filename
+from .storage import UploadTooLarge, create_storage, safe_filename
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-storage = LocalStorage()
+storage = create_storage()
 
 
 app = FastAPI(
@@ -64,6 +66,7 @@ app.mount(settings.public_media_url, StaticFiles(directory=str(settings.media_ro
 app.include_router(inference_router)
 app.include_router(exports_router)
 app.include_router(operations_router)
+app.include_router(uploads_router)
 app.include_router(quality_router)
 app.include_router(privacy_router)
 
@@ -100,7 +103,7 @@ def frame_response(frame: Frame) -> FrameResponse:
         video_id=frame.video_id,
         frame_number=frame.frame_number,
         timestamp_ms=frame.timestamp_ms,
-        image_url="{}/{}".format(settings.public_media_url, frame.storage_path),
+        image_url=storage.public_url(frame.storage_path),
         width=frame.width,
         height=frame.height,
     )
@@ -183,7 +186,7 @@ def upload_video(
     finally:
         video_file.file.close()
 
-    video.storage_path = storage.relative_path(destination)
+    video.storage_path = storage.persist(destination, video.mime_type)
     video.file_size = size
     video.status = "QUEUED"
     job = ProcessingJob(
@@ -226,6 +229,16 @@ def retry_job(job_id: str, session: Session = Depends(get_session)) -> JobRespon
     job.state = "QUEUED"
     job.error_code = None
     job.error_message = None
+    job.worker_id = None
+    job.lease_expires_at = None
+    job.heartbeat_at = None
+    outbox = session.scalar(select(JobOutbox).where(JobOutbox.job_id == job.id))
+    if outbox is None:
+        session.add(JobOutbox(job_id=job.id))
+    else:
+        outbox.status = "PENDING"
+        outbox.published_at = None
+        outbox.last_error = None
     session.commit()
     return JobResponse.model_validate(job)
 

@@ -58,6 +58,7 @@ type Tool = 'bbox' | 'keypoints';
 type LocalAnnotation = AnnotationDraft & { id: string };
 type BBox = { x: number; y: number; width: number; height: number };
 type Point = { name: string; x: number; y: number; visible: boolean };
+type PolygonPoint = { x: number; y: number };
 type Operation =
   | { kind: 'draw'; startX: number; startY: number }
   | { kind: 'move'; id: string; startX: number; startY: number; original: BBox }
@@ -347,7 +348,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
     setDirty(true);
   }, [selectedId]);
 
-  const runInference = async (modelKind: 'detection' | 'pose' | 'pii') => {
+  const runInference = async (modelKind: 'detection' | 'pose' | 'pii' | 'segmentation') => {
     if (!task?.video) return;
     setError(null);
     setMessage(null);
@@ -585,6 +586,19 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                       {prediction.label}{prediction.track_id ? ` #${prediction.track_id}` : ''} {(prediction.confidence * 100).toFixed(0)}%
                     </text>
                   </g>;
+                })() : prediction.annotation_type === 'polygon' ? (() => {
+                  const points = prediction.geometry.points as PolygonPoint[];
+                  const selected = selectedPredictionId === prediction.id;
+                  return <g key={prediction.id} onPointerDown={(event) => {
+                    event.stopPropagation();
+                    selectPrediction(prediction.id);
+                  }}>
+                    <polygon
+                      points={points.map((point) => `${point.x * 1000},${point.y * 1000}`).join(' ')}
+                      fill="rgba(245,158,11,.18)" stroke={selected ? '#facc15' : '#f59e0b'}
+                      strokeWidth={selected ? 6 : 4} strokeDasharray="12 8" vectorEffect="non-scaling-stroke"
+                    />
+                  </g>;
                 })() : (prediction.geometry.points as Point[]).map((point) => (
                   <g key={`${prediction.id}-${point.name}`} onPointerDown={(event) => {
                     event.stopPropagation();
@@ -622,6 +636,20 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
                     onPointerDown={(event) => { event.stopPropagation(); setOperation({ kind: 'resize', id: annotation.id, original: box }); }}
                   />}
                 </g>;
+              })() : annotation.annotation_type === 'polygon' ? (() => {
+                const points = annotation.geometry.points as PolygonPoint[];
+                const selected = selectedId === annotation.id;
+                return <polygon
+                  key={annotation.id}
+                  points={points.map((point) => `${point.x * 1000},${point.y * 1000}`).join(' ')}
+                  fill="rgba(34,197,94,.2)" stroke={selected ? '#facc15' : '#22c55e'}
+                  strokeWidth={selected ? 6 : 4} vectorEffect="non-scaling-stroke"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedId(annotation.id);
+                    setSelectedPredictionId(null);
+                  }}
+                />;
               })() : (annotation.geometry.points as Point[]).map((point) => (
                 <g key={`${annotation.id}-${point.name}`}>
                   <circle
@@ -647,6 +675,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
             <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('detection')}>Detect</Button>
             <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('pose')}>Pose</Button>
             <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('pii')}>PII</Button>
+            <Button size="small" variant="outlined" disabled={modelRun?.status === 'QUEUED' || modelRun?.status === 'RUNNING'} onClick={() => runInference('segmentation')}>Board mask</Button>
           </Stack>
           {modelRun && (
             <Box mb={2}>
@@ -673,7 +702,7 @@ const AnnotationWorkspace: React.FC<{ taskId: string }> = ({ taskId }) => {
               )}
               <Stack direction="row" spacing={0.5} mt={1}>
                 <Button size="small" color="success" startIcon={<Check />} onClick={acceptPrediction}>Accept</Button>
-                <Button size="small" startIcon={<Edit />} onClick={correctPrediction}>Correct</Button>
+                <Button size="small" startIcon={<Edit />} disabled={selectedPrediction.annotation_type === 'polygon'} onClick={correctPrediction}>Correct</Button>
                 <Button size="small" color="error" startIcon={<Close />} onClick={rejectPrediction}>Reject</Button>
               </Stack>
             </Box>

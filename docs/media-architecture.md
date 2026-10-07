@@ -16,7 +16,8 @@ Legacy Node/Replicate coach
 
 - FastAPI owns upload validation, persistence, status APIs, idempotency, and media URLs.
 - The worker owns CPU-heavy media commands and state transitions.
-- Storage paths are persisted as keys relative to a configured root, so local storage can later be replaced by S3-compatible object storage without changing API records.
+- Storage paths are persisted as portable object keys. The same API records work with the local
+  development adapter or the deployed S3/MinIO adapter.
 - The legacy Node backend owns only the optional coaching/chat demo. Its placeholder-frame path has
   been removed. `POST /api/coaching/reviewed/{task_id}` consumes only completed FastAPI review
   output and returns its task/video provenance; all canonical data-platform work belongs in FastAPI.
@@ -39,8 +40,10 @@ Each job records attempts, progress, stable error code, human-readable failure d
 ## Current scope and deliberate limits
 
 - Development defaults to SQLite; Docker Compose runs PostgreSQL.
-- Files use a shared local volume. An S3 adapter and presigned direct uploads are the next storage step.
-- The worker polls the database. Redis/Celery is intentionally deferred until workload evidence justifies it.
+- Development can use a shared local volume. Deployment can use private S3/MinIO with signed direct
+  uploads/downloads, worker staging, and checksummed artifact persistence.
+- A transactional PostgreSQL outbox publishes work to Redis/Celery. Worker leases and atomic claims
+  preserve recovery and idempotency under duplicate delivery or worker loss.
 - Overview/action/custom sampling and motion-aware bursts persist source timestamps. Scene and
   keyframe policies remain future sampling options.
 - Schema changes are managed through Alembic and CI verifies the migration head.

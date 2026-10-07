@@ -24,7 +24,8 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
 from app.database import Base  # noqa: E402
-from app.inference import UltralyticsProvider  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.inference import OpenCVPIIProvider, UltralyticsProvider  # noqa: E402
 from app.models import (  # noqa: E402
     Frame,
     ModelPrediction,
@@ -45,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-kind",
         action="append",
-        choices=("detection", "pose"),
+        choices=("detection", "pose", "pii"),
         dest="model_kinds",
         help="Model to run; repeat for both. Defaults to detection and pose.",
     )
@@ -251,15 +252,21 @@ def run_evaluation(args: argparse.Namespace) -> Dict[str, Any]:
             }
 
             for model_kind in model_kinds:
-                model_filename = "yolo11n-pose.pt" if model_kind == "pose" else "yolo11n.pt"
-                local_model = SERVICE_ROOT / model_filename
-                provider = UltralyticsProvider(
-                    str(local_model) if local_model.exists() else model_filename
-                )
+                if model_kind == "pii":
+                    model_filename = "opencv-haar+{}".format(settings.pii_screen_model)
+                    provider = OpenCVPIIProvider(settings.pii_screen_model)
+                    provider_name = "opencv+ultralytics"
+                else:
+                    model_filename = "yolo11n-pose.pt" if model_kind == "pose" else "yolo11n.pt"
+                    local_model = SERVICE_ROOT / model_filename
+                    provider = UltralyticsProvider(
+                        str(local_model) if local_model.exists() else model_filename
+                    )
+                    provider_name = "ultralytics"
                 model_run = ModelRun(
                     video=video,
                     model_kind=model_kind,
-                    provider="ultralytics",
+                    provider=provider_name,
                     model_name=model_filename,
                     model_version="pretrained",
                     device=args.device,

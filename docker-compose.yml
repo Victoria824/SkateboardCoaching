@@ -1,4 +1,27 @@
 services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: snowboard
+      MINIO_ROOT_PASSWORD: snowboard-development-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 snowboard snowboard-development-secret;
+      do sleep 1; done; mc mb --ignore-existing local/snowboard-media;
+      mc cors set local/snowboard-media /config/cors.xml"
+    volumes:
+      - ./infra/minio/cors.xml:/config/cors.xml:ro
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -13,14 +36,34 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
   media-migrate:
     build: ./media_service
     command: ["alembic", "upgrade", "head"]
     environment: &media-environment
       MEDIA_DATABASE_URL: postgresql+psycopg://snowboard:snowboard@postgres:5432/snowboard
       MEDIA_STORAGE_ROOT: /data/media
+      MEDIA_STORAGE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: snowboard-media
+      S3_ACCESS_KEY: snowboard
+      S3_SECRET_KEY: snowboard-development-secret
+      S3_REGION: us-east-1
       MEDIA_CORS_ORIGINS: http://localhost:3000
       MEDIA_FRAME_SAMPLE_FPS: 1
+      MEDIA_QUEUE_BACKEND: celery
+      MEDIA_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,6 +76,8 @@ services:
     depends_on:
       media-migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     volumes:
@@ -40,24 +85,44 @@ services:
 
   media-worker:
     build: ./media_service
-    command: ["python", "-m", "app.worker"]
+    command: ["celery", "-A", "app.celery_tasks:celery_app", "worker", "-Q", "media", "--concurrency=1", "--loglevel=INFO"]
     environment: *media-environment
     depends_on:
       media-migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     volumes:
       - media-data:/data/media
 
   media-worker-2:
     build: ./media_service
-    command: ["python", "-m", "app.worker"]
+    command: ["celery", "-A", "app.celery_tasks:celery_app", "worker", "-Q", "media", "--concurrency=1", "--loglevel=INFO"]
     environment: *media-environment
     depends_on:
       media-migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     volumes:
       - media-data:/data/media
+
+  media-dispatcher:
+    build: ./media_service
+    command: ["python", "-m", "app.dispatcher"]
+    environment: *media-environment
+    depends_on:
+      media-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres-data:
   media-data:
+  minio-data:
+  redis-data:

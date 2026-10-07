@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import main
 from app.database import Base, get_session
-from app.inference import PredictionOutput
+from app.inference import PredictionOutput, UltralyticsProvider
 from app.models import (
     AnnotationTask,
     Frame,
@@ -98,6 +98,50 @@ def make_database():
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+class FakeTensor:
+    def __init__(self, value):
+        self.value = value
+
+    def cpu(self):
+        return self
+
+    def tolist(self):
+        return self.value
+
+
+def test_ultralytics_segmentation_outputs_only_snowboard_polygons():
+    boxes = type(
+        "Boxes",
+        (),
+        {
+            "cls": FakeTensor([0, 1]),
+            "conf": FakeTensor([0.9, 0.8]),
+            "id": FakeTensor([7, 9]),
+        },
+    )()
+    masks = type(
+        "Masks",
+        (),
+        {
+            "xyn": [
+                FakeTensor([[0.1, 0.2], [0.4, 0.2], [0.3, 0.3]]),
+                FakeTensor([[0.2, 0.2], [0.7, 0.2], [0.6, 0.4]]),
+            ]
+        },
+    )()
+    result = type(
+        "Result", (), {"boxes": boxes, "masks": masks, "names": {0: "person", 1: "snowboard"}}
+    )()
+
+    outputs = UltralyticsProvider._segmentation_outputs(result)
+
+    assert len(outputs) == 1
+    assert outputs[0].label == "snowboard"
+    assert outputs[0].annotation_type == "polygon"
+    assert outputs[0].external_track_id == 9
+    assert outputs[0].geometry["points"][2] == {"x": 0.6, "y": 0.4}
 
 
 def test_inference_worker_persists_versioned_predictions(tmp_path):

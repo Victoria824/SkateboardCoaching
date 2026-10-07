@@ -1,6 +1,7 @@
 import io
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -50,6 +51,20 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
             annotation_type="bbox",
             geometry={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
         )
+        mask = Annotation(
+            task=task,
+            frame=frame,
+            label="snowboard",
+            annotation_type="polygon",
+            geometry={
+                "points": [
+                    {"x": 0.2, "y": 0.7},
+                    {"x": 0.8, "y": 0.7},
+                    {"x": 0.7, "y": 0.8},
+                    {"x": 0.3, "y": 0.8},
+                ]
+            },
+        )
         item = SanitizedExport(
             video=video,
             task=task,
@@ -58,7 +73,7 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
             storage_path="sanitized/export/sanitized.mp4",
             manifest_path="sanitized/export/manifest.json",
         )
-        session.add_all([video, frame, task, annotation, item])
+        session.add_all([video, frame, task, annotation, mask, item])
         session.commit()
         task_id, export_id = task.id, item.id
     video_path = export_storage.absolute_path("sanitized/export/sanitized.mp4")
@@ -83,9 +98,14 @@ def test_coco_yolo_and_sanitized_bundle_exports(tmp_path):
 
     assert coco.status_code == 200
     assert coco.json()["annotations"][0]["bbox"] == [64.0, 72.0, 192.0, 144.0]
+    assert coco.json()["annotations"][1]["segmentation"][0][:4] == pytest.approx(
+        [128.0, 252.0, 512.0, 252.0]
+    )
     with zipfile.ZipFile(io.BytesIO(yolo.content)) as archive:
-        assert archive.read("classes.txt") == b"face\n"
-        assert archive.read("labels/1.txt").startswith(b"0 0.250000 0.400000")
+        assert archive.read("classes.txt") == b"face\nsnowboard\n"
+        labels = archive.read("labels/1.txt")
+        assert labels.startswith(b"0 0.250000 0.400000")
+        assert b"1 0.200000 0.700000 0.800000 0.700000" in labels
     with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
         assert set(archive.namelist()) == {"sanitized.mp4", "manifest.json"}
     assert request_id.headers["X-Request-ID"] == "trace-123"

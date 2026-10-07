@@ -72,6 +72,7 @@ def create_model_run(
     default_model = {
         "pose": "yolo11n-pose.pt",
         "pii": "opencv-haar+{}".format(settings.pii_screen_model),
+        "segmentation": "yolo11n-seg.pt",
     }.get(request.model_kind, "yolo11n.pt")
     provider = "opencv+ultralytics" if request.model_kind == "pii" else request.provider
     if request.model_kind == "pii":

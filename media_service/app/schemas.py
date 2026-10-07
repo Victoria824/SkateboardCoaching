@@ -49,6 +49,9 @@ class JobResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
+    worker_id: Optional[str]
+    lease_expires_at: Optional[datetime]
+    heartbeat_at: Optional[datetime]
 
 
 class SanitizedExportRequest(BaseModel):
@@ -87,9 +90,26 @@ class UploadResponse(BaseModel):
     job: JobResponse
 
 
+class DirectUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(pattern=r"^video/")
+    size_bytes: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    sampling_profile: Literal["overview", "action", "motion", "custom"] = "overview"
+    sample_fps: Optional[float] = Field(default=None, ge=0.1, le=30)
+
+
+class DirectUploadResponse(BaseModel):
+    upload_id: str
+    object_key: str
+    upload_url: str
+    required_headers: Dict[str, str]
+    expires_at: datetime
+
+
 class AnnotationInput(BaseModel):
     label: str = Field(min_length=1, max_length=100)
-    annotation_type: Literal["bbox", "keypoints"]
+    annotation_type: Literal["bbox", "keypoints", "polygon"]
     geometry: Dict[str, Any]
     source: Literal["human", "model", "model_corrected", "track_propagated"] = "human"
     model_prediction_id: Optional[str] = None
@@ -108,7 +128,7 @@ class AnnotationInput(BaseModel):
                 raise ValueError("Bounding box dimensions must be positive")
             if values["x"] < 0 or values["y"] < 0 or values["x"] + values["width"] > 1 or values["y"] + values["height"] > 1:
                 raise ValueError("Bounding box coordinates must be normalized to the image")
-        else:
+        elif self.annotation_type == "keypoints":
             points = self.geometry.get("points")
             if not isinstance(points, list) or not points:
                 raise ValueError("Keypoint geometry requires a non-empty points array")
@@ -118,6 +138,23 @@ class AnnotationInput(BaseModel):
                 x, y = point.get("x"), point.get("y")
                 if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not 0 <= x <= 1 or not 0 <= y <= 1:
                     raise ValueError("Keypoint coordinates must be normalized to the image")
+        else:
+            points = self.geometry.get("points")
+            if not isinstance(points, list) or len(points) < 3:
+                raise ValueError("Polygon geometry requires at least three points")
+            for point in points:
+                if not isinstance(point, dict):
+                    raise ValueError("Each polygon point must be an object")
+                x, y = point.get("x"), point.get("y")
+                if (
+                    not isinstance(x, (int, float))
+                    or not isinstance(y, (int, float))
+                    or not math.isfinite(x)
+                    or not math.isfinite(y)
+                    or not 0 <= x <= 1
+                    or not 0 <= y <= 1
+                ):
+                    raise ValueError("Polygon coordinates must be normalized to the image")
         return self
 
 
@@ -159,7 +196,7 @@ class AnnotationSaveResponse(BaseModel):
 
 
 class ModelRunRequest(BaseModel):
-    model_kind: Literal["detection", "pose", "pii"] = "detection"
+    model_kind: Literal["detection", "pose", "pii", "segmentation"] = "detection"
     provider: Literal["ultralytics", "opencv+ultralytics"] = "ultralytics"
     model_name: Optional[str] = None
     model_version: str = "pretrained"

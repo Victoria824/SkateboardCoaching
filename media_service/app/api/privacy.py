@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_session
 from ..models import (
     Annotation,
@@ -22,9 +21,11 @@ from ..schemas import (
     SanitizedExportRequest,
     SanitizedExportResponse,
 )
+from ..storage import create_storage
 
 
 router = APIRouter(prefix="/api", tags=["privacy exports"])
+storage = create_storage()
 
 
 def export_response(item: SanitizedExport) -> SanitizedExportResponse:
@@ -36,12 +37,12 @@ def export_response(item: SanitizedExport) -> SanitizedExportResponse:
         labels=item.labels,
         source_annotation_count=item.source_annotation_count,
         video_url=(
-            "{}/{}".format(settings.public_media_url, item.storage_path)
+            storage.public_url(item.storage_path)
             if item.storage_path
             else None
         ),
         manifest_url=(
-            "{}/{}".format(settings.public_media_url, item.manifest_path)
+            storage.public_url(item.manifest_path)
             if item.manifest_path
             else None
         ),
