@@ -56,6 +56,10 @@ The release gate now uses a revision-pinned Grounding DINO detector independent 
 first pass. A separate sanitized-video gold workflow measures residual miss rate and refuses to
 claim a pass without reviewer-confirmed positive leakage controls.
 
+For a complete Chinese team handoff covering source collection, two-person annotation, original and
+residual PII gold sets, scoring, QA, and a 50/50 work split, see
+[the gold-label team execution handbook](docs/team-gold-labeling-handoff-zh.md).
+
 ## ✨ Features
 
 - **Primary data platform**: FastAPI, PostgreSQL/SQLite, workers, FFmpeg, local Ultralytics/OpenCV
