@@ -51,8 +51,16 @@ class FakeResidualProvider:
         assert model_kind == "pii"
         return [self.findings for _ in image_paths]
 
+    def infer_frame(self, image_path, model_kind, confidence_threshold, device):
+        assert model_kind == "pii"
+        assert image_path.exists()
+        return self.findings
+
 
 class BrokenResidualProvider(FakeResidualProvider):
+    def infer_frame(self, image_path, model_kind, confidence_threshold, device):
+        raise RuntimeError("residual model unavailable")
+
     def infer_frames(self, image_paths, model_kind, confidence_threshold, device):
         raise RuntimeError("residual model unavailable")
 
@@ -298,10 +306,15 @@ def test_residual_pii_blocks_release_and_records_findings(tmp_path):
             residual_provider=BrokenResidualProvider(),
         )
         session.refresh(failed_scan)
+        failed_manifest = json.loads(
+            storage.absolute_path(failed_scan.manifest_path).read_text()
+        )
 
         assert failed_scan.status == "FAILED"
         assert failed_scan.error_code == "RESIDUAL_SCAN_FAILED"
         assert failed_scan.storage_path is None
+        assert failed_manifest["residual_pii_scan"]["provider"] == "grounding-dino"
+        assert len(failed_manifest["residual_pii_scan"]["model_revision"]) == 40
 
 
 def test_sanitization_failure_writes_audit_manifest(tmp_path):

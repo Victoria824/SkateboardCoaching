@@ -38,7 +38,8 @@ Node/Replicate coaching adapter consumes completed review output downstream.
 - YOLO segmentation runs persist tracked snowboard polygons. Reviewers can accept/reject masks and
   export them in COCO or Ultralytics YOLO segmentation format.
 - Accepted PII boxes become editable row-major RLE masks. FFmpeg merges blur through the reviewed
-  pixels, then a post-render PII scan blocks release and records findings in the audit manifest.
+  pixels, then an independently trained, revision-pinned Grounding DINO post-render scan blocks
+  release and records model provenance and findings in the audit manifest.
 
 SQLite is the zero-setup development default. Set `MEDIA_DATABASE_URL` to a PostgreSQL URL for a deployed environment.
 
@@ -127,6 +128,10 @@ docker compose up --build
 | `MEDIA_QUEUE_BACKEND` | `database` | Local polling or deployed `celery` delivery |
 | `MEDIA_REDIS_URL` | `redis://localhost:6379/0` | Celery broker URL |
 | `MEDIA_RESIDUAL_PII_SCAN` | `true` | Require a zero-finding post-render scan before release |
+| `MEDIA_RESIDUAL_PII_PROVIDER` | `grounding-dino` | Independent second-pass provider; `opencv-yolo` is a development fallback only |
+| `MEDIA_RESIDUAL_PII_MODEL` | `IDEA-Research/grounding-dino-tiny` | Hugging Face checkpoint for residual detection |
+| `MEDIA_RESIDUAL_PII_MODEL_REVISION` | pinned commit | Immutable checkpoint revision recorded in manifests |
+| `MEDIA_RESIDUAL_PII_DEVICE` | `cpu` | Grounding DINO execution device (`cpu`, `mps`, or CUDA device) |
 | `MEDIA_RESIDUAL_PII_SCAN_FPS` | `5` | Sanitized-video scan sampling rate |
 | `MEDIA_RESIDUAL_PII_CONFIDENCE` | `0.25` | Fail-closed residual detector threshold |
 | `MEDIA_RESIDUAL_PII_MASK_COVERAGE` | `0.8` | Coverage needed to classify a re-detection as protected |

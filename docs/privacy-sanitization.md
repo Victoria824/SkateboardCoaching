@@ -29,8 +29,10 @@ while stripping source metadata and chapters.
 
 ## Residual-PII release gate
 
-After rendering, the service samples the output at `MEDIA_RESIDUAL_PII_SCAN_FPS` and runs the PII
-provider again. A face, plate, or screen proposal with less than 80% reviewed-mask coverage produces
+After rendering, the service samples the output at `MEDIA_RESIDUAL_PII_SCAN_FPS` and runs a
+separate Grounding DINO open-vocabulary detector. This Transformer detector is independent of the
+OpenCV Haar/Ultralytics first pass, and its Hugging Face model commit is pinned and recorded. A
+face, plate, or screen proposal with less than 80% reviewed-mask coverage produces
 `RESIDUAL_PII_DETECTED`; covered re-detections are retained separately in the manifest so device
 outline detections do not permanently block screen sanitization. Failed video is deleted from
 staging and never gains a public storage key. Only a zero-uncovered-finding scan can reach
@@ -69,8 +71,8 @@ remains unresolved.
 
 ## Detection boundary
 
-The default provider uses OpenCV Haar cascades for faces and license plates and maps YOLO `tv`,
+The first-pass provider uses OpenCV Haar cascades for faces and license plates and maps YOLO `tv`,
 `laptop`, and `cell phone` detections to `screen`. These remain proposals rather than automatic
-privacy decisions. The residual gate is meaningful but not proof of zero PII: it currently reuses
-the configured provider and can share its blind spots. Production validation should use a separately
-trained scanner plus a reviewer-confirmed residual-video gold set.
+privacy decisions. The residual gate uses revision-pinned Grounding DINO with explicit face, plate,
+monitor, laptop, and smartphone prompts. Independence reduces correlated blind spots but does not
+prove zero PII; the reviewer-confirmed residual-video gold gate remains mandatory before production.

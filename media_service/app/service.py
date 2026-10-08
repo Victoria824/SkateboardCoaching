@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .inference import (
+    create_residual_pii_provider,
     InferenceError,
     OpenCVPIIProvider,
     PredictionOutput,
@@ -568,28 +569,34 @@ def scan_residual_pii(
     mask_segments,
     video_width: int,
     video_height: int,
+    heartbeat=None,
 ) -> dict:
     """Fail-closed second-pass PII scan over the rendered artifact."""
     frames = processor.extract_frames(
         video_path, scan_directory, settings.residual_pii_scan_fps
     )
-    if hasattr(provider, "infer_frames"):
+    if hasattr(provider, "infer_frame"):
+        outputs_by_frame = []
+        for frame_index, frame in enumerate(frames, start=1):
+            outputs_by_frame.append(
+                provider.infer_frame(
+                    frame,
+                    "pii",
+                    settings.residual_pii_confidence,
+                    settings.residual_pii_device,
+                )
+            )
+            if heartbeat and (frame_index % 10 == 0 or frame_index == len(frames)):
+                heartbeat()
+    else:
         outputs_by_frame = provider.infer_frames(
             frames,
             "pii",
             settings.residual_pii_confidence,
-            "cpu",
+            settings.residual_pii_device,
         )
-    else:
-        outputs_by_frame = [
-            provider.infer_frame(
-                frame,
-                "pii",
-                settings.residual_pii_confidence,
-                "cpu",
-            )
-            for frame in frames
-        ]
+        if heartbeat:
+            heartbeat()
     findings = []
     covered_redetections = []
     for frame_index, outputs in enumerate(outputs_by_frame, start=1):
@@ -599,17 +606,17 @@ def scan_residual_pii(
                 continue
             geometry = output.geometry
             detection = {
-                    "frame_number": frame_index,
-                    "timestamp_ms": round(timestamp_seconds * 1000),
-                    "label": output.label,
-                    "confidence": output.confidence,
-                    "geometry": geometry,
-                    "track_id": (
-                        str(output.external_track_id)
-                        if output.external_track_id is not None
-                        else None
-                    ),
-                }
+                "frame_number": frame_index,
+                "timestamp_ms": round(timestamp_seconds * 1000),
+                "label": output.label,
+                "confidence": output.confidence,
+                "geometry": geometry,
+                "track_id": (
+                    str(output.external_track_id)
+                    if output.external_track_id is not None
+                    else None
+                ),
+            }
             x1 = float(geometry["x"]) * video_width
             y1 = float(geometry["y"]) * video_height
             x2 = x1 + float(geometry["width"]) * video_width
@@ -641,6 +648,9 @@ def scan_residual_pii(
     return {
         "status": "PASSED" if not findings else "FAILED",
         "model_version": provider.runtime_version,
+        "provider": getattr(provider, "provider_name", provider.__class__.__name__),
+        "model_name": getattr(provider, "model_name", None),
+        "model_revision": getattr(provider, "model_revision", None),
         "sample_fps": settings.residual_pii_scan_fps,
         "confidence_threshold": settings.residual_pii_confidence,
         "mask_coverage_threshold": settings.residual_pii_mask_coverage,
@@ -730,9 +740,12 @@ def process_sanitization_job(
         if settings.residual_pii_scan_enabled:
             scan_directory = destination.parent / "residual-scan"
             try:
-                residual_provider = residual_provider or OpenCVPIIProvider(
-                    settings.pii_screen_model
-                )
+                residual_provider = residual_provider or create_residual_pii_provider()
+
+                def scan_heartbeat():
+                    renew_job_lease(job)
+                    session.commit()
+
                 residual_scan = scan_residual_pii(
                     processor,
                     residual_provider,
@@ -741,6 +754,7 @@ def process_sanitization_job(
                     segments,
                     item.video.width,
                     item.video.height,
+                    heartbeat=scan_heartbeat,
                 )
             except Exception as error:
                 for scan_file in (
@@ -759,6 +773,15 @@ def process_sanitization_job(
                     {
                         "status": "FAILED",
                         "finding_count": 0,
+                        "provider": settings.residual_pii_provider,
+                        "model_name": settings.residual_pii_model,
+                        "model_revision": settings.residual_pii_model_revision,
+                        "model_version": "{}@{}".format(
+                            settings.residual_pii_model,
+                            settings.residual_pii_model_revision,
+                        ),
+                        "sample_fps": settings.residual_pii_scan_fps,
+                        "confidence_threshold": settings.residual_pii_confidence,
                         "error": str(error)[-2000:],
                     },
                 )

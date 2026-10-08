@@ -1,6 +1,10 @@
 import pytest
 
-from app.gold import evaluate_gold_manifest, evaluate_pii_gold_manifest
+from app.gold import (
+    evaluate_gold_manifest,
+    evaluate_pii_gold_manifest,
+    evaluate_residual_pii_gold_manifest,
+)
 
 
 def test_gold_evaluation_scores_detection_and_association():
@@ -213,3 +217,100 @@ def test_pii_gold_evaluation_scores_recall_slices_tracks_and_gate():
     assert result["tracks"]["coverage"][f"{checksum}:face:face-track"] == 0.5
     assert result["by_difficult_case"]["motion_blur"]["recall"] == 1
     assert result["quality_gate"]["passed"] is False
+
+
+def test_residual_gold_evaluation_measures_miss_rate_and_fails_closed():
+    checksum = "d" * 64
+    manifest = {
+        "schema_version": "1.0",
+        "dataset": {"name": "residual-gold-v1", "created_at": "2026-10-08T00:00:00Z"},
+        "videos": [
+            {
+                "source": {"sha256": checksum},
+                "split": "test",
+                "frames": [
+                    {
+                        "frame_number": 1,
+                        "timestamp_ms": 0,
+                        "review_status": "approved",
+                        "objects": [
+                            {
+                                "id": "residual-face",
+                                "label": "face",
+                                "annotation_type": "bbox",
+                                "geometry": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+                            },
+                            {
+                                "id": "residual-screen",
+                                "label": "screen",
+                                "annotation_type": "bbox",
+                                "geometry": {"x": 0.6, "y": 0.2, "width": 0.3, "height": 0.4},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    report = {
+        "source": {"sha256": checksum},
+        "media": {"duration_ms": 60_000},
+        "runs": [
+            {
+                "model_kind": "residual_pii",
+                "provider": "huggingface-transformers-grounding-dino",
+                "model_name": "IDEA-Research/grounding-dino-tiny",
+                "model_revision": "pinned-sha",
+                "model_version": "transformers-test",
+                "predictions": [
+                    {
+                        "frame_number": 1,
+                        "label": "face",
+                        "annotation_type": "bbox",
+                        "geometry": {"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = evaluate_residual_pii_gold_manifest(manifest, [report])
+
+    assert result["evaluation_kind"] == "residual_pii_leakage"
+    assert result["residual_pii_objects"] == 2
+    assert result["residual_pii_missed"] == 1
+    assert result["residual_miss_rate"] == 0.5
+    assert result["leaking_frame_miss_rate"] == 1
+    assert result["quality_gate"]["passed"] is False
+    assert result["model_runs"][0]["model_revision"] == "pinned-sha"
+
+
+def test_residual_gold_requires_positive_leakage_controls():
+    checksum = "e" * 64
+    manifest = {
+        "schema_version": "1.0",
+        "dataset": {"name": "empty-residual-gold", "created_at": "2026-10-08T00:00:00Z"},
+        "videos": [
+            {
+                "source": {"sha256": checksum},
+                "frames": [
+                    {
+                        "frame_number": 1,
+                        "timestamp_ms": 0,
+                        "review_status": "approved",
+                        "objects": [],
+                    }
+                ],
+            }
+        ],
+    }
+    report = {
+        "source": {"sha256": checksum},
+        "media": {"duration_ms": 1000},
+        "runs": [{"model_kind": "residual_pii", "predictions": []}],
+    }
+
+    result = evaluate_residual_pii_gold_manifest(manifest, [report])
+
+    assert result["quality_gate"]["passed"] is False
+    assert "not measurable" in result["quality_gate"]["failures"][0]

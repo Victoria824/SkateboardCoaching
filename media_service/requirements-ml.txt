@@ -3,3 +3,5 @@ ultralytics>=8.3,<9
 lap>=0.5.12,<1
 onnxruntime>=1.19,<2
 onnx>=1.17,<2
+transformers>=4.49,<6
+safetensors>=0.4,<1

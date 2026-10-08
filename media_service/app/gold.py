@@ -223,8 +223,10 @@ def evaluate_pii_gold_manifest(
         model_runs.append(
             {
                 "source_sha256": checksum,
+                "provider": pii_run.get("provider"),
                 "model_name": pii_run.get("model_name"),
                 "model_version": pii_run.get("model_version"),
+                "model_revision": pii_run.get("model_revision"),
                 "confidence_threshold": pii_run.get("confidence_threshold"),
                 "device": pii_run.get("device"),
             }
@@ -359,3 +361,65 @@ def evaluate_pii_gold_manifest(
         "model_runs": model_runs,
         "quality_gate": {"passed": not gate_failures, "failures": gate_failures},
     }
+
+
+def evaluate_residual_pii_gold_manifest(
+    manifest: Dict[str, Any],
+    prediction_reports: Iterable[Dict[str, Any]],
+    iou_threshold: float = 0.5,
+    split_name: str = "test",
+    max_miss_rate: float = 0.0,
+) -> Dict[str, Any]:
+    """Measure privacy leakage missed by the independent post-redaction detector.
+
+    The gold source hashes must identify sanitized videos. A gold object means PII is still
+    recognizable after rendering, so production defaults to a zero-false-negative gate.
+    """
+    if not 0 <= max_miss_rate <= 1:
+        raise ValueError("Residual max miss rate must be between 0 and 1")
+    normalized_reports = []
+    for report in prediction_reports:
+        normalized = dict(report)
+        normalized["runs"] = [
+            {**run, "model_kind": "pii"}
+            for run in report.get("runs", [])
+            if run.get("model_kind") == "residual_pii"
+        ]
+        normalized_reports.append(normalized)
+    result = evaluate_pii_gold_manifest(
+        manifest,
+        normalized_reports,
+        iou_threshold=iou_threshold,
+        recall_targets={label: 1.0 for label in PII_LABELS},
+        split_name=split_name,
+    )
+    gold_count = result["overall"]["tp"] + result["overall"]["fn"]
+    miss_rate = result["overall"]["fn"] / gold_count if gold_count else 0.0
+    leaking_frame_miss_rate = (
+        result["frames_with_uncovered_pii"] / result["frames_with_gold_pii"]
+        if result["frames_with_gold_pii"]
+        else 0.0
+    )
+    failures = []
+    if not gold_count:
+        failures.append(
+            "no reviewer-confirmed residual PII positives; detector miss rate is not measurable"
+        )
+    if result["overall"]["fn"] and miss_rate > max_miss_rate:
+        failures.append(
+            "residual PII miss rate {:.4f} exceeds {:.4f} ({} missed objects)".format(
+                miss_rate, max_miss_rate, result["overall"]["fn"]
+            )
+        )
+    result.update(
+        {
+            "evaluation_kind": "residual_pii_leakage",
+            "max_miss_rate": max_miss_rate,
+            "residual_pii_objects": gold_count,
+            "residual_pii_missed": result["overall"]["fn"],
+            "residual_miss_rate": miss_rate,
+            "leaking_frame_miss_rate": leaking_frame_miss_rate,
+            "quality_gate": {"passed": not failures, "failures": failures},
+        }
+    )
+    return result

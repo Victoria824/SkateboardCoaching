@@ -22,6 +22,10 @@ class Settings:
     ffprobe_binary: str
     pii_screen_model: str
     residual_pii_scan_enabled: bool
+    residual_pii_provider: str
+    residual_pii_model: str
+    residual_pii_model_revision: str
+    residual_pii_device: str
     residual_pii_scan_fps: float
     residual_pii_confidence: float
     residual_pii_mask_coverage: float
@@ -43,6 +47,20 @@ class Settings:
             raise ValueError("MEDIA_RESIDUAL_PII_CONFIDENCE must be between 0 and 1")
         if not 0 <= self.residual_pii_mask_coverage <= 1:
             raise ValueError("MEDIA_RESIDUAL_PII_MASK_COVERAGE must be between 0 and 1")
+        if self.residual_pii_provider not in {"grounding-dino", "opencv-yolo"}:
+            raise ValueError(
+                "MEDIA_RESIDUAL_PII_PROVIDER must be grounding-dino or opencv-yolo"
+            )
+        if self.residual_pii_provider == "grounding-dino" and (
+            len(self.residual_pii_model_revision) != 40
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.residual_pii_model_revision
+            )
+        ):
+            raise ValueError(
+                "MEDIA_RESIDUAL_PII_MODEL_REVISION must be a 40-character commit SHA"
+            )
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -67,6 +85,17 @@ class Settings:
             pii_screen_model=os.getenv("MEDIA_PII_SCREEN_MODEL", "yolo11n.pt"),
             residual_pii_scan_enabled=os.getenv("MEDIA_RESIDUAL_PII_SCAN", "true").lower()
             in {"1", "true", "yes", "on"},
+            residual_pii_provider=os.getenv(
+                "MEDIA_RESIDUAL_PII_PROVIDER", "grounding-dino"
+            ).lower(),
+            residual_pii_model=os.getenv(
+                "MEDIA_RESIDUAL_PII_MODEL", "IDEA-Research/grounding-dino-tiny"
+            ),
+            residual_pii_model_revision=os.getenv(
+                "MEDIA_RESIDUAL_PII_MODEL_REVISION",
+                "a2bb814dd30d776dcf7e30523b00659f4f141c71",
+            ),
+            residual_pii_device=os.getenv("MEDIA_RESIDUAL_PII_DEVICE", "cpu"),
             residual_pii_scan_fps=float(os.getenv("MEDIA_RESIDUAL_PII_SCAN_FPS", "5")),
             residual_pii_confidence=float(
                 os.getenv("MEDIA_RESIDUAL_PII_CONFIDENCE", "0.25")

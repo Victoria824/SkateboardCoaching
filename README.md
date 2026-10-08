@@ -52,6 +52,10 @@ FFmpeg masked blur, COCO RLE export, and a fail-closed residual-PII release gate
 [privacy sanitization](docs/privacy-sanitization.md) and
 [production readiness](docs/production-readiness.md).
 
+The release gate now uses a revision-pinned Grounding DINO detector independent of the OpenCV/YOLO
+first pass. A separate sanitized-video gold workflow measures residual miss rate and refuses to
+claim a pass without reviewer-confirmed positive leakage controls.
+
 ## ✨ Features
 
 - **Primary data platform**: FastAPI, PostgreSQL/SQLite, workers, FFmpeg, local Ultralytics/OpenCV

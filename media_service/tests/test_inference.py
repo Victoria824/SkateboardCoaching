@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import main
 from app.database import Base, get_session
-from app.inference import PredictionOutput, UltralyticsProvider
+from app.inference import GroundingDinoPIIProvider, PredictionOutput, UltralyticsProvider
 from app.models import (
     AnnotationTask,
     Frame,
@@ -19,6 +19,27 @@ from app.models import (
 )
 from app.service import claim_next_job, process_inference_job
 from app.storage import LocalStorage
+
+
+def test_grounding_dino_maps_prompts_and_deduplicates_overlaps():
+    assert GroundingDinoPIIProvider._canonical_label("a vehicle license plate") == "license_plate"
+    assert GroundingDinoPIIProvider._canonical_label("a smartphone screen") == "screen"
+    assert GroundingDinoPIIProvider._canonical_label("a human face") == "face"
+    assert GroundingDinoPIIProvider._canonical_label("snowboard") is None
+    first = PredictionOutput(
+        label="screen",
+        confidence=0.9,
+        annotation_type="bbox",
+        geometry={"x": 0.1, "y": 0.1, "width": 0.4, "height": 0.4},
+    )
+    duplicate = PredictionOutput(
+        label="screen",
+        confidence=0.8,
+        annotation_type="bbox",
+        geometry={"x": 0.1, "y": 0.1, "width": 0.4, "height": 0.4},
+    )
+
+    assert GroundingDinoPIIProvider._deduplicate([duplicate, first]) == [first]
 
 
 class FakeProvider:

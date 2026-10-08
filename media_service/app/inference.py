@@ -1,4 +1,5 @@
 import os
+import inspect
 import math
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -416,3 +417,177 @@ class OpenCVPIIProvider:
             for path in image_paths
         ]
         return UltralyticsProvider._fill_missing_track_ids(sequence, max_gap=3)
+
+
+class GroundingDinoPIIProvider:
+    """Independent open-vocabulary residual scanner backed by Grounding DINO."""
+
+    provider_name = "huggingface-transformers-grounding-dino"
+    prompt_labels = {
+        "a human face": "face",
+        "a vehicle license plate": "license_plate",
+        "a computer monitor screen": "screen",
+        "a laptop screen": "screen",
+        "a smartphone screen": "screen",
+    }
+
+    def __init__(self, model_name: str, revision: str, device: str = "cpu"):
+        # Keep weights on the shared worker staging volume so multiple workers reuse one snapshot.
+        cache_directory = settings.media_root / ".cache" / "huggingface"
+        cache_directory.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("HF_HOME", str(cache_directory))
+        try:
+            import torch
+            import transformers
+            from PIL import Image
+            from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+        except ImportError as error:
+            raise InferenceError(
+                "ML_DEPENDENCY_MISSING",
+                "Install requirements-ml.txt to run Grounding DINO residual inference",
+            ) from error
+        self.torch = torch
+        self.Image = Image
+        self.model_name = model_name
+        self.model_revision = revision
+        self.device = device
+        self.runtime_version = "transformers-{}:{}@{}".format(
+            transformers.__version__, model_name, revision
+        )
+        try:
+            self.processor = AutoProcessor.from_pretrained(
+                model_name, revision=revision, trust_remote_code=False
+            )
+            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
+                model_name,
+                revision=revision,
+                trust_remote_code=False,
+                use_safetensors=True,
+            ).to(device)
+            resolved_revision = getattr(self.model.config, "_commit_hash", None)
+            if resolved_revision and resolved_revision != revision:
+                raise ValueError(
+                    "Resolved model revision {} does not match pinned {}".format(
+                        resolved_revision, revision
+                    )
+                )
+            self.model.eval()
+            parameters = inspect.signature(
+                self.processor.post_process_grounded_object_detection
+            ).parameters
+            self._box_threshold_parameter = (
+                "box_threshold" if "box_threshold" in parameters else "threshold"
+            )
+        except Exception as error:
+            raise InferenceError("MODEL_LOAD_FAILED", str(error)) from error
+
+    @staticmethod
+    def _canonical_label(text_label: str) -> Optional[str]:
+        normalized = str(text_label).lower().strip().rstrip(".")
+        if "license plate" in normalized or "number plate" in normalized:
+            return "license_plate"
+        if "face" in normalized:
+            return "face"
+        if any(value in normalized for value in ("screen", "monitor", "smartphone")):
+            return "screen"
+        return None
+
+    @staticmethod
+    def _iou(first: PredictionOutput, second: PredictionOutput) -> float:
+        a, b = first.geometry, second.geometry
+        left = max(float(a["x"]), float(b["x"]))
+        top = max(float(a["y"]), float(b["y"]))
+        right = min(float(a["x"]) + float(a["width"]), float(b["x"]) + float(b["width"]))
+        bottom = min(float(a["y"]) + float(a["height"]), float(b["y"]) + float(b["height"]))
+        intersection = max(0.0, right - left) * max(0.0, bottom - top)
+        union = (
+            float(a["width"]) * float(a["height"])
+            + float(b["width"]) * float(b["height"])
+            - intersection
+        )
+        return intersection / union if union > 0 else 0.0
+
+    @classmethod
+    def _deduplicate(cls, outputs: List[PredictionOutput], threshold: float = 0.7):
+        kept: List[PredictionOutput] = []
+        for candidate in sorted(outputs, key=lambda item: item.confidence, reverse=True):
+            if any(
+                candidate.label == existing.label and cls._iou(candidate, existing) >= threshold
+                for existing in kept
+            ):
+                continue
+            kept.append(candidate)
+        return kept
+
+    def infer_frame(
+        self, image_path: Path, model_kind: str, confidence_threshold: float, device: str
+    ) -> List[PredictionOutput]:
+        try:
+            image = self.Image.open(image_path).convert("RGB")
+            prompt = ". ".join(self.prompt_labels) + "."
+            inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.device)
+            with self.torch.no_grad():
+                raw_outputs = self.model(**inputs)
+            post_process_arguments = {
+                self._box_threshold_parameter: confidence_threshold,
+                "text_threshold": confidence_threshold,
+                "target_sizes": [image.size[::-1]],
+            }
+            result = self.processor.post_process_grounded_object_detection(
+                raw_outputs, inputs.input_ids, **post_process_arguments
+            )[0]
+        except Exception as error:
+            raise InferenceError("INFERENCE_FAILED", str(error)) from error
+        image_width, image_height = image.size
+        text_labels = result.get("text_labels")
+        if text_labels is None:
+            text_labels = result.get("labels")
+        if text_labels is None:
+            text_labels = []
+        outputs = []
+        for box, score, text_label in zip(result["boxes"], result["scores"], text_labels):
+            label = self._canonical_label(text_label)
+            if label is None:
+                continue
+            coordinates = box.detach().cpu().tolist() if hasattr(box, "detach") else list(box)
+            confidence = float(score.detach().cpu().item()) if hasattr(score, "detach") else float(score)
+            x1, y1, x2, y2 = coordinates
+            outputs.append(
+                PredictionOutput(
+                    label=label,
+                    confidence=confidence,
+                    annotation_type="bbox",
+                    geometry=OpenCVPIIProvider._geometry(
+                        x1, y1, x2 - x1, y2 - y1, image_width, image_height
+                    ),
+                )
+            )
+        return self._deduplicate(outputs)
+
+    def infer_frames(
+        self,
+        image_paths: Sequence[Path],
+        model_kind: str,
+        confidence_threshold: float,
+        device: str,
+    ) -> List[List[PredictionOutput]]:
+        return [
+            self.infer_frame(path, model_kind, confidence_threshold, device)
+            for path in image_paths
+        ]
+
+
+def create_residual_pii_provider() -> PredictionProvider:
+    """Build the configured release-gate detector; unknown choices fail closed."""
+    if settings.residual_pii_provider == "grounding-dino":
+        return GroundingDinoPIIProvider(
+            settings.residual_pii_model,
+            settings.residual_pii_model_revision,
+            settings.residual_pii_device,
+        )
+    if settings.residual_pii_provider == "opencv-yolo":
+        return OpenCVPIIProvider(settings.pii_screen_model)
+    raise InferenceError(
+        "INVALID_RESIDUAL_PROVIDER",
+        "Unsupported residual PII provider: {}".format(settings.residual_pii_provider),
+    )

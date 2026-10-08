@@ -15,6 +15,8 @@
   at-least-once distributed delivery; compare-and-swap claims make duplicate messages harmless.
 - PII proposals become editable RLE pixel masks; FFmpeg performs masked blur and a post-render
   residual-PII scan blocks release whenever the detector finds a possible region.
+- The independent Grounding DINO adapter has completed a real local frame/video smoke test with a
+  pinned checkpoint; see `docs/residual-pii-smoke.md`.
 
 ## Deliberate boundaries
 
@@ -24,8 +26,9 @@
   also requires broker TLS/authentication, managed failover, and a dead-letter administration path.
 - The demo API has no tenant authentication or role-based authorization. Signed object URLs limit
   bucket exposure but do not replace API auth, reviewer identity, or per-project access control.
-- Snowboard instance segmentation and PII pixel-mask review are implemented. The residual gate
-  currently reuses the configured PII provider, so production still needs an independently trained
-  second-pass model and reviewer-confirmed residual-video evaluation.
+- Snowboard instance segmentation and PII pixel-mask review are implemented. The residual gate now
+  uses a revision-pinned Grounding DINO detector independent of the OpenCV/YOLO first pass. A real
+  reviewer-confirmed residual-video gold report is still required; the evaluator intentionally
+  refuses to call a zero-positive dataset a measured production pass.
 - The initial real-frame ONNX smoke benchmark is recorded in `docs/onnx-benchmark.md`; a larger
   gold-video benchmark is still required before making production-throughput claims.

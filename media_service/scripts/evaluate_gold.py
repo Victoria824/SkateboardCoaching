@@ -10,7 +10,11 @@ from pathlib import Path
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
-from app.gold import evaluate_gold_manifest, evaluate_pii_gold_manifest  # noqa: E402
+from app.gold import (  # noqa: E402
+    evaluate_gold_manifest,
+    evaluate_pii_gold_manifest,
+    evaluate_residual_pii_gold_manifest,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,8 +22,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("prediction_reports", type=Path, nargs="+")
     parser.add_argument("--iou-threshold", type=float, default=0.5)
-    parser.add_argument("--mode", choices=("general", "pii"), default="general")
+    parser.add_argument(
+        "--mode", choices=("general", "pii", "residual-pii"), default="general"
+    )
     parser.add_argument("--split", default="test", help="PII dataset split to evaluate")
+    parser.add_argument(
+        "--max-residual-miss-rate",
+        type=float,
+        default=0.0,
+        help="Release threshold for residual PII; production default is zero",
+    )
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -30,7 +42,15 @@ def main() -> None:
     reports = [
         json.loads(path.read_text(encoding="utf-8")) for path in args.prediction_reports
     ]
-    if args.mode == "pii":
+    if args.mode == "residual-pii":
+        result = evaluate_residual_pii_gold_manifest(
+            manifest,
+            reports,
+            args.iou_threshold,
+            split_name=args.split,
+            max_miss_rate=args.max_residual_miss_rate,
+        )
+    elif args.mode == "pii":
         result = evaluate_pii_gold_manifest(
             manifest, reports, args.iou_threshold, split_name=args.split
         )
